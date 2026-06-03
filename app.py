@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 # ── Imports backend ──
 from database import engine, SessionLocal, Base
@@ -36,23 +37,30 @@ st.set_page_config(
 # THÈME DYNAMIQUE (dark / light)
 # ══════════════════════════════════════════════════════════
 
+@contextmanager
+def db_session():
+    """Context manager pour session BDD."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def _get_theme():
     """Lit le thème depuis la BDD. Défaut: dark."""
-    db = get_db()
-    param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
-    db.close()
-    return param.valeur if param and param.valeur else "dark"
+    with db_session() as db:
+        param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+        return param.valeur if param and param.valeur else "dark"
 
 def _set_theme(theme: str):
     """Sauvegarde le thème en BDD."""
-    db = get_db()
-    param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
-    if param:
-        param.valeur = theme
-    else:
-        db.add(models.Parametre(cle="theme", valeur=theme))
-    db.commit()
-    db.close()
+    with db_session() as db:
+        param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+        if param:
+            param.valeur = theme
+        else:
+            db.add(models.Parametre(cle="theme", valeur=theme))
+        db.commit()
 
 # L'initialisation du thème est faite après init_db()
 
@@ -106,19 +114,8 @@ st.markdown("""
 def init_db():
     """Initialise la base de données (une seule fois)."""
     Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-    models.Parametre.creer_defauts(db)
-    db.close()
-
-
-def get_db():
-    """Retourne une session BDD."""
-    db = SessionLocal()
-    try:
-        return db
-    except Exception:
-        db.close()
-        raise
+    with db_session() as db:
+        models.Parametre.creer_defauts(db)
 
 
 init_db()
@@ -132,74 +129,78 @@ st.markdown(_theme_css(), unsafe_allow_html=True)
 def _importer_csv_si_vide():
     """Importe le CSV de l'ancienne app si la BDD est vide (premier lancement)."""
     import csv as _csv
-    db = get_db()
-    nb = db.query(models.Matiere).count()
-    if nb > 0:
-        db.close()
-        return  # Déjà des données, ne rien faire
+    
+    with db_session() as db:
+        nb = db.query(models.Matiere).count()
+        if nb > 0:
+            return  # Déjà des données, ne rien faire
 
-    csv_path = os.path.join(os.path.dirname(__file__), "Sauvegarde app précédente.csv")
-    if not os.path.exists(csv_path):
-        db.close()
-        return
+        csv_path = os.path.join(os.path.dirname(__file__), "Sauvegarde app précédente.csv")
+        if not os.path.exists(csv_path):
+            return
 
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = _csv.DictReader(f)
-        for row in reader:
-            ue_nom = row.get("UE", "").strip()
-            mat_nom = row.get("Matière", "").strip()
-            chap_nom = row.get("Chapitre", "").strip()
-            niveau = int(row.get("Niveau", "0") or "0")
-            prochain = row.get("Prochain", "").strip() or cfg.date_aujourdhui()
-            mega = row.get("Méga chapitre", "").strip() or None
-            notes = row.get("Notes", "").strip() or ""
-            video = row.get("Vidéo", "").strip() or None
+        try:
+            with open(csv_path, "r", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    ue_nom = row.get("UE", "").strip()
+                    mat_nom = row.get("Matière", "").strip()
+                    chap_nom = row.get("Chapitre", "").strip()
+                    try:
+                        niveau = int(row.get("Niveau", "0") or "0")
+                    except ValueError:
+                        niveau = 0
+                    prochain = row.get("Prochain", "").strip() or cfg.date_aujourdhui()
+                    mega = row.get("Méga chapitre", "").strip() or None
+                    notes = row.get("Notes", "").strip() or ""
+                    video = row.get("Vidéo", "").strip() or None
 
-            if not mat_nom or not chap_nom:
-                continue
+                    if not mat_nom or not chap_nom:
+                        continue
 
-            # UE
-            if ue_nom:
-                ue = db.query(models.UE).filter(models.UE.nom == ue_nom).first()
-                if not ue:
-                    ue = models.UE(nom=ue_nom)
-                    db.add(ue)
-                    db.flush()
-            else:
-                ue = None
+                    # UE
+                    if ue_nom:
+                        ue = db.query(models.UE).filter(models.UE.nom == ue_nom).first()
+                        if not ue:
+                            ue = models.UE(nom=ue_nom)
+                            db.add(ue)
+                            db.flush()
+                    else:
+                        ue = None
 
-            # Matière
-            matiere = db.query(models.Matiere).filter(models.Matiere.nom == mat_nom).first()
-            if not matiere:
-                matiere = models.Matiere(nom=mat_nom)
-                db.add(matiere)
-                db.flush()
-            if ue and ue not in matiere.ues:
-                matiere.ues.append(ue)
-                db.flush()
+                    # Matière
+                    matiere = db.query(models.Matiere).filter(models.Matiere.nom == mat_nom).first()
+                    if not matiere:
+                        matiere = models.Matiere(nom=mat_nom)
+                        db.add(matiere)
+                        db.flush()
+                    if ue and ue not in matiere.ues:
+                        matiere.ues.append(ue)
+                        db.flush()
 
-            # Chapitre (skip si existe déjà)
-            existant = db.query(models.Chapitre).filter(
-                models.Chapitre.matiere_id == matiere.id,
-                models.Chapitre.nom == chap_nom,
-            ).first()
-            if existant:
-                continue
+                    # Chapitre (skip si existe déjà)
+                    existant = db.query(models.Chapitre).filter(
+                        models.Chapitre.matiere_id == matiere.id,
+                        models.Chapitre.nom == chap_nom,
+                    ).first()
+                    if existant:
+                        continue
 
-            max_ordre = db.query(models.Chapitre.ordre).filter(
-                models.Chapitre.matiere_id == matiere.id
-            ).order_by(models.Chapitre.ordre.desc()).first()
-            ordre = (max_ordre[0] + 1) if max_ordre and max_ordre[0] is not None else 0
+                    max_ordre = db.query(models.Chapitre.ordre).filter(
+                        models.Chapitre.matiere_id == matiere.id
+                    ).order_by(models.Chapitre.ordre.desc()).first()
+                    ordre = (max_ordre[0] + 1) if max_ordre and max_ordre[0] is not None else 0
 
-            chap = models.Chapitre(
-                matiere_id=matiere.id, nom=chap_nom, ordre=ordre,
-                niveau_actuel=niveau, date_prochaine=prochain,
-                mega_chapitre=mega, notes=notes, video_youtube=video,
-                fichiers_attaches=[],
-            )
-            db.add(chap)
-    db.commit()
-    db.close()
+                    chap = models.Chapitre(
+                        matiere_id=matiere.id, nom=chap_nom, ordre=ordre,
+                        niveau_actuel=niveau, date_prochaine=prochain,
+                        mega_chapitre=mega, notes=notes, video_youtube=video,
+                        fichiers_attaches=[],
+                    )
+                    db.add(chap)
+            db.commit()
+        except Exception as e:
+            st.error(f"Erreur lors de l'import CSV : {e}")
 
 _importer_csv_si_vide()
 
@@ -209,11 +210,10 @@ def get_ia() -> ServiceIA | None:
     if "ia_service" not in st.session_state:
         st.session_state.ia_service = ServiceIA()
     # Mettre à jour la clé depuis les paramètres stockés
-    db = get_db()
-    param = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
-    db.close()
-    if param and param.valeur:
-        st.session_state.ia_service.cle_api = param.valeur
+    with db_session() as db:
+        param = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+        if param and param.valeur:
+            st.session_state.ia_service.cle_api = param.valeur
     if st.session_state.ia_service.disponible:
         return st.session_state.ia_service
     return None
@@ -312,11 +312,10 @@ def _render_chapitre(chap, matiere_id):
 
         with col3:
             if st.button("\u2705 Valider", key=f"val_{chap.uid}", width='stretch'):
-                db = get_db()
-                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                if c:
-                    revision_service.valider_chapitre(db, c)
-                db.close()
+                with db_session() as db:
+                    c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                    if c:
+                        revision_service.valider_chapitre(db, c)
                 st.rerun()
 
         # ── Fichiers attachés ──
@@ -329,9 +328,8 @@ def _render_chapitre(chap, matiere_id):
                     st.caption(f"  \U0001f4c4 {f.get('nom', 'PDF')}")
                 with col_f2:
                     if st.button("\u274c", key=f"del_file_{chap.uid}_{i}", help="Retirer ce fichier"):
-                        db = get_db()
-                        crud_service.retirer_fichier(db, matiere_id, chap.uid, i)
-                        db.close()
+                        with db_session() as db:
+                            crud_service.retirer_fichier(db, matiere_id, chap.uid, i)
                         st.rerun()
 
         # ── Upload PDF ──
@@ -344,9 +342,8 @@ def _render_chapitre(chap, matiere_id):
             chemin = os.path.join(cfg.DOSSIER_FICHIERS, nom_fichier)
             with open(chemin, "wb") as f_out:
                 f_out.write(uploaded.getbuffer())
-            db = get_db()
-            crud_service.ajouter_fichier(db, matiere_id, chap.uid, uploaded.name, chemin)
-            db.close()
+            with db_session() as db:
+                crud_service.ajouter_fichier(db, matiere_id, chap.uid, uploaded.name, chemin)
             st.success(f"\U0001f4c4 {uploaded.name} attach\u00e9 !")
             st.rerun()
 
@@ -366,12 +363,11 @@ def _render_chapitre(chap, matiere_id):
                                 all_text += texte + "\n\n"
                         if all_text.strip():
                             texte_concat = all_text
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                            if c:
-                                c.texte_cache = texte_concat
-                                db.commit()
-                            db.close()
+                            with db_session() as db:
+                                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                                if c:
+                                    c.texte_cache = texte_concat
+                                    db.commit()
                             st.success("PDF analys\u00e9s ! Reclique pour g\u00e9n\u00e9rer la fiche.")
                             st.rerun()
                         else:
@@ -382,12 +378,11 @@ def _render_chapitre(chap, matiere_id):
                     with st.spinner("\U0001f9e0 DeepSeek g\u00e9n\u00e8re la fiche..."):
                         try:
                             fiche = ia.generer_fiche(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat)
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                            if c:
-                                c.fiche_ia = fiche
-                                db.commit()
-                            db.close()
+                            with db_session() as db:
+                                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                                if c:
+                                    c.fiche_ia = fiche
+                                    db.commit()
                             st.success("Fiche g\u00e9n\u00e9r\u00e9e !")
                             st.rerun()
                         except Exception as e:
@@ -398,12 +393,11 @@ def _render_chapitre(chap, matiere_id):
                     with st.spinner("\U0001f3af DeepSeek cr\u00e9e le quiz..."):
                         try:
                             questions = ia.generer_questions(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat, nb=5)
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                            if c:
-                                c.quiz_cache = questions
-                                db.commit()
-                            db.close()
+                            with db_session() as db:
+                                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                                if c:
+                                    c.quiz_cache = questions
+                                    db.commit()
                             st.success(f"{len(questions)} questions g\u00e9n\u00e9r\u00e9es !")
                             st.rerun()
                         except Exception as e:
@@ -414,12 +408,11 @@ def _render_chapitre(chap, matiere_id):
                     with st.spinner("\U0001f4cb DeepSeek cr\u00e9e le QCM..."):
                         try:
                             qcm = ia.generer_qcm(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat, nb=5)
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                            if c:
-                                c.qcm_cache = qcm
-                                db.commit()
-                            db.close()
+                            with db_session() as db:
+                                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                                if c:
+                                    c.qcm_cache = qcm
+                                    db.commit()
                             st.success("QCM g\u00e9n\u00e9r\u00e9 !")
                             st.rerun()
                         except Exception as e:
@@ -446,20 +439,29 @@ def _render_chapitre(chap, matiere_id):
                                                               chap.quiz_cache, reponses, texte_concat)
                             score = eval_result.get("score_num", 0)
                             reussi = eval_result.get("verdict") == "r\u00e9ussi"
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                            if c:
-                                revision_service.callback_quiz(db, c, score, reussi, "ouvert")
-                            db.close()
-                            st.markdown(f"### Verdict : {'\u2705 R\u00e9ussi' if reussi else '\U0001f4da \u00c0 retravailler'}")
-                            st.markdown(f"**Score :** {int(score * 100)}%")
-                            st.markdown(eval_result.get("message", ""))
-                            for j, r in enumerate(eval_result.get("resultats", [])):
-                                emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
-                                st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
+                            with db_session() as db:
+                                c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                                if c:
+                                    revision_service.callback_quiz(db, c, score, reussi, "ouvert")
+                            
+                            # Stocker le résultat pour l'afficher après rerun
+                            st.session_state[f"last_eval_{chap.uid}"] = eval_result
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erreur IA : {e}")
+
+                if f"last_eval_{chap.uid}" in st.session_state:
+                    res = st.session_state[f"last_eval_{chap.uid}"]
+                    reussi = res.get("verdict") == "r\u00e9ussi"
+                    st.markdown(f"### Verdict : {'\u2705 R\u00e9ussi' if reussi else '\U0001f4da \u00c0 retravailler'}")
+                    st.markdown(f"**Score :** {int(res.get('score_num', 0) * 100)}%")
+                    st.markdown(res.get("message", ""))
+                    for j, r in enumerate(res.get("resultats", [])):
+                        emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
+                        st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
+                    if st.button("Fermer le r\u00e9sultat", key=f"close_eval_{chap.uid}"):
+                        del st.session_state[f"last_eval_{chap.uid}"]
+                        st.rerun()
 
         # ── QCM interactif ──
         if chap.qcm_cache:
@@ -476,18 +478,36 @@ def _render_chapitre(chap, matiere_id):
                             corrects += 1
                     score = corrects / len(chap.qcm_cache)
                     reussi = score >= 0.7
-                    db = get_db()
-                    c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                    if c:
-                        revision_service.callback_quiz(db, c, score, reussi, "qcm")
-                    db.close()
-                    st.markdown(f"### Score : {corrects}/{len(chap.qcm_cache)} ({int(score * 100)}%) — {'\u2705 R\u00e9ussi' if reussi else '\U0001f4da \u00c0 retravailler'}")
+                    with db_session() as db:
+                        c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                        if c:
+                            revision_service.callback_quiz(db, c, score, reussi, "qcm")
+                    
+                    res_qcm = {
+                        "score_num": score,
+                        "corrects": corrects,
+                        "total": len(chap.qcm_cache),
+                        "reussi": reussi,
+                        "details": []
+                    }
                     for i, q_data in enumerate(chap.qcm_cache):
-                        user = reponses_qcm.get(i)
-                        correct = q_data["correct"]
-                        emoji = "\u2705" if user == correct else "\u274c"
-                        st.markdown(f"{emoji} **Q{i+1}** : {correct} — {q_data.get('explication', '')}")
+                        res_qcm["details"].append({
+                            "user": reponses_qcm.get(i),
+                            "correct": q_data["correct"],
+                            "explication": q_data.get("explication", "")
+                        })
+                    st.session_state[f"last_qcm_{chap.uid}"] = res_qcm
                     st.rerun()
+
+                if f"last_qcm_{chap.uid}" in st.session_state:
+                    res = st.session_state[f"last_qcm_{chap.uid}"]
+                    st.markdown(f"### Score : {res['corrects']}/{res['total']} ({int(res['score_num'] * 100)}%) — {'\u2705 R\u00e9ussi' if res['reussi'] else '\U0001f4da \u00c0 retravailler'}")
+                    for i, d in enumerate(res["details"]):
+                        emoji = "\u2705" if d["user"] == d["correct"] else "\u274c"
+                        st.markdown(f"{emoji} **Q{i+1}** : {d['correct']} — {d['explication']}")
+                    if st.button("Fermer le r\u00e9sultat", key=f"close_qcm_{chap.uid}"):
+                        del st.session_state[f"last_qcm_{chap.uid}"]
+                        st.rerun()
 
         # ── Flashcards IA ──
         if ia and fichiers:
@@ -553,24 +573,21 @@ def _render_chapitre(chap, matiere_id):
                     st.session_state[f"rename_chap_{chap.uid}"] = True
             with ac2:
                 if st.button("\u25b2", key=f"up_{chap.uid}", help="Monter"):
-                    db = get_db()
-                    crud_service.monter_chapitre(db, matiere_id, chap.uid)
-                    db.close()
+                    with db_session() as db:
+                        crud_service.monter_chapitre(db, matiere_id, chap.uid)
                     st.rerun()
             with ac3:
                 if st.button("\u25bc", key=f"down_{chap.uid}", help="Descendre"):
-                    db = get_db()
-                    crud_service.descendre_chapitre(db, matiere_id, chap.uid)
-                    db.close()
+                    with db_session() as db:
+                        crud_service.descendre_chapitre(db, matiere_id, chap.uid)
                     st.rerun()
             with ac4:
                 if st.button("\U0001f4c1", key=f"mega_{chap.uid}", help="Grouper"):
                     st.session_state[f"mega_chap_{chap.uid}"] = True
             with ac5:
                 if st.button("\U0001f4cb", key=f"dup_{chap.uid}", help="Dupliquer"):
-                    db = get_db()
-                    crud_service.dupliquer_chapitre(db, matiere_id, chap.uid)
-                    db.close()
+                    with db_session() as db:
+                        crud_service.dupliquer_chapitre(db, matiere_id, chap.uid)
                     st.success("Duplique !")
                     st.rerun()
             with ac6:
@@ -578,18 +595,16 @@ def _render_chapitre(chap, matiere_id):
                     st.session_state[f"move_chap_{chap.uid}"] = True
             with ac7:
                 if st.button("\U0001f504", key=f"reset_{chap.uid}", help="Reset"):
-                    db = get_db()
-                    c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
-                    if c:
-                        revision_service.reinitialiser_chapitre(db, c)
-                    db.close()
+                    with db_session() as db:
+                        c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                        if c:
+                            revision_service.reinitialiser_chapitre(db, c)
                     st.success("Reinitialise")
                     st.rerun()
             with ac8:
                 if st.button("\U0001f5d1\ufe0f", key=f"del_{chap.uid}", help="Supprimer"):
-                    db = get_db()
-                    crud_service.supprimer_chapitre(db, matiere_id, chap.uid)
-                    db.close()
+                    with db_session() as db:
+                        crud_service.supprimer_chapitre(db, matiere_id, chap.uid)
                     st.success("Supprime")
                     st.rerun()
 
@@ -599,15 +614,13 @@ def _render_chapitre(chap, matiere_id):
             col_a, col_b = st.columns(2)
             with col_a:
                 if st.button("Renommer", key=f"rn_btn_{chap.uid}"):
-                    db = get_db()
-                    try:
-                        crud_service.renommer_chapitre(db, matiere_id, chap.uid, new_n.strip())
-                        db.close()
-                        st.session_state[f"rename_chap_{chap.uid}"] = False
-                        st.rerun()
-                    except ValueError as e:
-                        st.error(str(e))
-                        db.close()
+                    with db_session() as db:
+                        try:
+                            crud_service.renommer_chapitre(db, matiere_id, chap.uid, new_n.strip())
+                            st.session_state[f"rename_chap_{chap.uid}"] = False
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
             with col_b:
                 if st.button("Annuler", key=f"rn_cancel_{chap.uid}"):
                     st.session_state[f"rename_chap_{chap.uid}"] = False
@@ -616,24 +629,21 @@ def _render_chapitre(chap, matiere_id):
         if st.session_state.get(f"mega_chap_{chap.uid}"):
             mega_name = st.text_input("Nom du groupe (vide = degrouper)", key=f"mega_input_{chap.uid}")
             if st.button("Appliquer", key=f"mega_btn_{chap.uid}"):
-                db = get_db()
-                crud_service.assigner_mega(db, matiere_id, chap.uid, mega_name.strip() or None)
-                db.close()
+                with db_session() as db:
+                    crud_service.assigner_mega(db, matiere_id, chap.uid, mega_name.strip() or None)
                 st.session_state[f"mega_chap_{chap.uid}"] = False
                 st.rerun()
 
         if st.session_state.get(f"move_chap_{chap.uid}"):
-            db = get_db()
-            autres = [m.nom for m in crud_service.lister_matieres(db) if m.id != matiere_id]
-            db.close()
+            with db_session() as db:
+                autres = [m.nom for m in crud_service.lister_matieres(db) if m.id != matiere_id]
             if autres:
                 dst = st.selectbox("Matiere de destination", autres, key=f"move_dst_{chap.uid}")
                 if st.button("Deplacer", key=f"move_btn_{chap.uid}"):
-                    db = get_db()
-                    mat_dst = db.query(models.Matiere).filter(models.Matiere.nom == dst).first()
-                    if mat_dst:
-                        crud_service.deplacer_chapitre(db, matiere_id, chap.uid, mat_dst.id)
-                    db.close()
+                    with db_session() as db:
+                        mat_dst = db.query(models.Matiere).filter(models.Matiere.nom == dst).first()
+                        if mat_dst:
+                            crud_service.deplacer_chapitre(db, matiere_id, chap.uid, mat_dst.id)
                     st.session_state[f"move_chap_{chap.uid}"] = False
                     st.success("Deplace !")
                     st.rerun()
@@ -646,9 +656,8 @@ def _render_chapitre(chap, matiere_id):
         if st.session_state.get(f"notes_chap_{chap.uid}"):
             notes_val = st.text_area("Notes", value=chap.notes or "", key=f"notes_input_{chap.uid}", height=80)
             if st.button("Sauvegarder les notes", key=f"notes_save_{chap.uid}"):
-                db = get_db()
-                crud_service.editer_notes(db, matiere_id, chap.uid, notes_val)
-                db.close()
+                with db_session() as db:
+                    crud_service.editer_notes(db, matiere_id, chap.uid, notes_val)
                 st.success("Notes sauvegardees !")
                 st.session_state[f"notes_chap_{chap.uid}"] = False
                 st.rerun()
@@ -681,74 +690,71 @@ with st.sidebar:
     # Recherche rapide
     q = st.text_input("🔍 Rechercher", placeholder="Matière ou chapitre...", label_visibility="collapsed")
     if q:
-        db = get_db()
-        results = db.query(models.Chapitre).filter(
-            models.Chapitre.nom.ilike(f"%{q}%") | models.Chapitre.notes.ilike(f"%{q}%")
-        ).limit(10).all()
-        matieres = db.query(models.Matiere).filter(models.Matiere.nom.ilike(f"%{q}%")).all()
-        db.close()
+        with db_session() as db:
+            results = db.query(models.Chapitre).filter(
+                models.Chapitre.nom.ilike(f"%{q}%") | models.Chapitre.notes.ilike(f"%{q}%")
+            ).limit(10).all()
+            matieres = db.query(models.Matiere).filter(models.Matiere.nom.ilike(f"%{q}%")).all()
 
-        for m in matieres:
-            if st.button(f"📖 {m.nom}", width='stretch'):
-                naviguer("matiere", m.id, m.nom)
-        for c in results[:5]:
-            if st.button(f"📝 {c.nom} ({c.matiere.nom})", width='stretch'):
-                naviguer("matiere", c.matiere_id, c.matiere.nom)
+            for m in matieres:
+                if st.button(f"📖 {m.nom}", width='stretch'):
+                    naviguer("matiere", m.id, m.nom)
+            for c in results[:5]:
+                if st.button(f"📝 {c.nom} ({c.matiere.nom})", width='stretch'):
+                    naviguer("matiere", c.matiere_id, c.matiere.nom)
 
     st.markdown("---")
 
     # Liste des matières (groupées par UE)
     st.markdown("**Matières**")
-    db = get_db()
-    matieres = crud_service.lister_matieres(db)
-    ues = crud_service.lister_ues(db)
+    with db_session() as db:
+        matieres = crud_service.lister_matieres(db)
+        ues = crud_service.lister_ues(db)
 
-    # Matières avec UE
-    assignees = set()
-    for ue in ues:
-        ue_matieres = [m for m in ue.matieres if m.nom in [x.nom for x in matieres]]
-        if not ue_matieres:
-            continue
-        with st.container():
-            st.markdown(f"📁 **{ue.nom}**")
-            for m in ue_matieres:
-                assignees.add(m.id)
-                urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    if st.button(f"   📖 {m.nom[:22]}", key=f"side_{m.id}", width='stretch',
-                                 type="primary" if st.session_state.matiere_id == m.id else "secondary"):
-                        naviguer("matiere", m.id, m.nom)
-                with col2:
-                    if urg > 0:
-                        st.markdown(f'<span class="urgent-badge">{urg}</span>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<span class="count-badge">{len(m.chapitres)}</span>', unsafe_allow_html=True)
+        # Matières avec UE
+        assignees = set()
+        for ue in ues:
+            ue_matieres = [m for m in ue.matieres if m.nom in [x.nom for x in matieres]]
+            if not ue_matieres:
+                continue
+            with st.container():
+                st.markdown(f"📁 **{ue.nom}**")
+                for m in ue_matieres:
+                    assignees.add(m.id)
+                    urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
+                    col1, col2 = st.columns([5, 1])
+                    with col1:
+                        if st.button(f"   📖 {m.nom[:22]}", key=f"side_{m.id}", width='stretch',
+                                     type="primary" if st.session_state.matiere_id == m.id else "secondary"):
+                            naviguer("matiere", m.id, m.nom)
+                    with col2:
+                        if urg > 0:
+                            st.markdown(f'<span class="urgent-badge">{urg}</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<span class="count-badge">{len(m.chapitres)}</span>', unsafe_allow_html=True)
 
-    # Matières sans UE
-    sans_ue = [m for m in matieres if m.id not in assignees]
-    if ues and sans_ue:
-        st.caption("Autres matières")
-    for m in sans_ue:
-        urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            if st.button(f"📖 {m.nom[:25]}", key=f"side_noue_{m.id}", width='stretch',
-                         type="primary" if st.session_state.matiere_id == m.id else "secondary"):
-                naviguer("matiere", m.id, m.nom)
-        with col2:
-            if urg > 0:
-                st.markdown(f'<span class="urgent-badge">{urg}</span>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<span class="count-badge">{len(m.chapitres)}</span>', unsafe_allow_html=True)
+        # Matières sans UE
+        sans_ue = [m for m in matieres if m.id not in assignees]
+        if ues and sans_ue:
+            st.caption("Autres matières")
+        for m in sans_ue:
+            urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                if st.button(f"📖 {m.nom[:25]}", key=f"side_noue_{m.id}", width='stretch',
+                             type="primary" if st.session_state.matiere_id == m.id else "secondary"):
+                    naviguer("matiere", m.id, m.nom)
+            with col2:
+                if urg > 0:
+                    st.markdown(f'<span class="urgent-badge">{urg}</span>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<span class="count-badge">{len(m.chapitres)}</span>', unsafe_allow_html=True)
 
     if not matieres:
         st.caption("Aucune matière")
 
     if st.button("\uff0b Nouveau (mati\u00e8re ou UE)", width='stretch'):
         st.session_state.show_new_mat = True
-
-    db.close()
 
     st.markdown("---")
 
@@ -767,8 +773,8 @@ with st.sidebar:
     with col3:
         if st.button("\u21a9\ufe0f Undo", width='stretch'):
             try:
-                db2 = get_db()
-                db2.close()
+                with db_session() as db2:
+                    pass # Just check if we can open a session
                 naviguer(st.session_state.page, st.session_state.matiere_id, st.session_state.matiere_nom)
             except Exception:
                 st.warning("Rien \u00e0 annuler")
@@ -780,10 +786,9 @@ with st.sidebar:
 
 @st.dialog("\u2699\ufe0f Param\u00e8tres", width="large")
 def show_settings_dialog():
-    db = get_db()
-    param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
-    db.close()
-    cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
+    with db_session() as db:
+        param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+        cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
     ia = get_ia()
 
     st.markdown("### \U0001f9e0 Intelligence Artificielle (DeepSeek)")
@@ -800,15 +805,14 @@ def show_settings_dialog():
     col1, col2 = st.columns(2)
     with col1:
         if st.button("\U0001f4be Sauvegarder", width='stretch', use_container_width=True):
-            db2 = get_db()
-            p = db2.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
-            if not p:
-                p = models.Parametre(cle="deepseek_api_key", valeur=new_key.strip())
-                db2.add(p)
-            else:
-                p.valeur = new_key.strip()
-            db2.commit()
-            db2.close()
+            with db_session() as db2:
+                p = db2.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+                if not p:
+                    p = models.Parametre(cle="deepseek_api_key", valeur=new_key.strip())
+                    db2.add(p)
+                else:
+                    p.valeur = new_key.strip()
+                db2.commit()
             if "ia_service" in st.session_state:
                 st.session_state.ia_service.cle_api = new_key.strip()
             st.success("Cl\u00e9 API sauvegard\u00e9e !")
@@ -837,30 +841,26 @@ if st.session_state.get("show_new_mat"):
             with col2:
                 ue_mat = st.text_input("UE (optionnel)", key="new_mat_ue")
             if st.button("Créer la matière", width='stretch') and nom_mat.strip():
-                db = get_db()
-                try:
-                    crud_service.creer_matiere(db, nom_mat.strip(), ue_mat.strip() if ue_mat.strip() else None)
-                    st.success(f"Matière « {nom_mat} » créée !")
-                    st.session_state.show_new_mat = False
-                    rafraichir()
-                except ValueError as e:
-                    st.error(str(e))
-                finally:
-                    db.close()
+                with db_session() as db:
+                    try:
+                        crud_service.creer_matiere(db, nom_mat.strip(), ue_mat.strip() if ue_mat.strip() else None)
+                        st.success(f"Matière « {nom_mat} » créée !")
+                        st.session_state.show_new_mat = False
+                        rafraichir()
+                    except ValueError as e:
+                        st.error(str(e))
 
         else:
             nom_ue = st.text_input("Nom de l'UE", placeholder="ex: UE 2 - Mathématiques", key="new_ue_name")
             if st.button("Créer l'UE", width='stretch') and nom_ue.strip():
-                db = get_db()
-                try:
-                    crud_service.creer_ue(db, nom_ue.strip())
-                    st.success(f"UE « {nom_ue} » créée !")
-                    st.session_state.show_new_mat = False
-                    rafraichir()
-                except ValueError as e:
-                    st.error(str(e))
-                finally:
-                    db.close()
+                with db_session() as db:
+                    try:
+                        crud_service.creer_ue(db, nom_ue.strip())
+                        st.success(f"UE « {nom_ue} » créée !")
+                        st.session_state.show_new_mat = False
+                        rafraichir()
+                    except ValueError as e:
+                        st.error(str(e))
         if st.button("Annuler", width='stretch'):
             st.session_state.show_new_mat = False
             rafraichir()
@@ -871,31 +871,22 @@ if st.session_state.get("show_new_mat"):
 # ══════════════════════════════════════════════════════════
 
 if st.session_state.page == "dashboard":
-    db = get_db()
-    chapitres_all = db.query(models.Chapitre).all()
-    total = len(chapitres_all)
-    urgent = sum(1 for c in chapitres_all if cfg.diff_jours(c.date_prochaine) <= 0)
-    bientot = sum(1 for c in chapitres_all if 0 < cfg.diff_jours(c.date_prochaine) <= 3)
-    maitrise = sum(1 for c in chapitres_all if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
-    nb_matieres = db.query(models.Matiere).count()
+    with db_session() as db:
+        chapitres_all = db.query(models.Chapitre).all()
+        total = len(chapitres_all)
+        urgent = sum(1 for c in chapitres_all if cfg.diff_jours(c.date_prochaine) <= 0)
+        bientot = sum(1 for c in chapitres_all if 0 < cfg.diff_jours(c.date_prochaine) <= 3)
+        maitrise = sum(1 for c in chapitres_all if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+        nb_matieres = db.query(models.Matiere).count()
 
-    # Streak
-    from models import Activite
-    act_items = sorted(
-        [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
-        key=lambda x: x[0], reverse=True,
-    )
+        # Streak
+        from models import Activite
+        act_items = sorted(
+            [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
+            key=lambda x: x[0], reverse=True,
+        )
+    
     auj = datetime.now().date()
-    streak = 0
-    for i in range(365):
-        d = (auj - timedelta(days=i)).strftime("%Y-%m-%d")
-        found = next((a for a in act_items if a[0] == d), None)
-        if found and found[1] > 0:
-            streak += 1
-        else:
-            break
-
-    db.close()
 
     pct_maitrise = int(maitrise / total * 100) if total > 0 else 0
 
@@ -954,9 +945,8 @@ if st.session_state.page == "dashboard":
                 st.rerun()
         with col2:
             if st.button(f"⚡ Tout valider ({urgent})", width='stretch'):
-                db = get_db()
-                revision_service.valider_chapitres_urgents(db)
-                db.close()
+                with db_session() as db:
+                    revision_service.valider_chapitres_urgents(db)
                 st.success(f"{urgent} chapitres validés !")
                 st.rerun()
 
@@ -999,101 +989,113 @@ if st.session_state.page == "dashboard":
 
     # Chapitres urgents
     st.subheader("📋 À réviser aujourd'hui")
-    db = get_db()
-    urgents_chaps = [(c, c.matiere) for c in db.query(models.Chapitre).all() if cfg.diff_jours(c.date_prochaine) <= 0]
-    urgents_chaps.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
+    with db_session() as db:
+        urgents_chaps = [(c, c.matiere) for c in db.query(models.Chapitre).all() if cfg.diff_jours(c.date_prochaine) <= 0]
+        urgents_chaps.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
 
-    if not urgents_chaps:
-        st.success("🎉 Tout est à jour ! Aucune révision en retard.")
-    else:
-        for chap, matiere in urgents_chaps:
-            retard = cfg.diff_jours(chap.date_prochaine)
-            badge_text, badge_color = status_badge(retard, chap.date_prochaine)
+        if not urgents_chaps:
+            st.success("🎉 Tout est à jour ! Aucune révision en retard.")
+        else:
+            for chap, matiere in urgents_chaps:
+                retard = cfg.diff_jours(chap.date_prochaine)
+                badge_text, badge_color = status_badge(retard, chap.date_prochaine)
 
-            with st.container(border=True):
-                col1, col2, col3 = st.columns([4, 2, 1])
-                with col1:
-                    st.markdown(f"**{chap.nom}**")
-                    st.caption(f"📖 {matiere.nom}  ·  J+{cfg.INTERVALLES_J[min(chap.niveau_actuel, 13)]}")
-                    render_progress(chap.niveau_actuel)
-                with col2:
-                    st.markdown(f'<span style="color:{badge_color};font-size:0.9rem"> {badge_text}</span>',
-                                unsafe_allow_html=True)
-                with col3:
-                    if st.button("✅", key=f"val_{chap.uid}", help="Valider ce chapitre"):
-                        c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
-                        if c:
-                            revision_service.valider_chapitre(db, c)
-                        st.rerun()
-
-    db.close()
+                with st.container(border=True):
+                    col1, col2, col3 = st.columns([4, 2, 1])
+                    with col1:
+                        st.markdown(f"**{chap.nom}**")
+                        st.caption(f"📖 {matiere.nom}  ·  J+{cfg.INTERVALLES_J[min(chap.niveau_actuel, 13)]}")
+                        render_progress(chap.niveau_actuel)
+                    with col2:
+                        st.markdown(f'<span style="color:{badge_color};font-size:0.9rem"> {badge_text}</span>',
+                                    unsafe_allow_html=True)
+                    with col3:
+                        if st.button("✅", key=f"val_{chap.uid}", help="Valider ce chapitre"):
+                            c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
+                            if c:
+                                revision_service.valider_chapitre(db, c)
+                            st.rerun()
 
     st.markdown("---")
 
     # Matières overview
     st.subheader("📖 Toutes les matières")
-    db = get_db()
-    matieres_all = crud_service.lister_matieres(db)
+    with db_session() as db:
+        matieres_all = crud_service.lister_matieres(db)
 
-    for m in matieres_all:
-        urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
-        with st.container(border=True):
-            col1, col2, col3 = st.columns([4, 2, 1])
-            with col1:
-                ue_tag = f" 📁 {m.ues[0].nom}" if m.ues else ""
-                st.markdown(f"📖 **{m.nom}**{ue_tag}")
-            with col2:
-                st.caption(f"{len(m.chapitres)} ch.  " + (f"🔥 {urg}" if urg > 0 else ""))
-            with col3:
-                if st.button("Ouvrir", key=f"open_{m.id}"):
-                    naviguer("matiere", m.id, m.nom)
-
-    db.close()
+        for m in matieres_all:
+            urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([4, 2, 1])
+                with col1:
+                    ue_tag = f" 📁 {m.ues[0].nom}" if m.ues else ""
+                    st.markdown(f"📖 **{m.nom}**{ue_tag}")
+                with col2:
+                    st.caption(f"{len(m.chapitres)} ch.  " + (f"🔥 {urg}" if urg > 0 else ""))
+                with col3:
+                    if st.button("Ouvrir", key=f"open_{m.id}"):
+                        naviguer("matiere", m.id, m.nom)
 
     # Session d'étude (popup via expander)
     if st.session_state.get("show_session"):
         st.markdown("---")
         st.header("📖 Session d'étude")
-        st.info("Parcourez vos chapitres un par un et validez-les.")
-        db2 = get_db()
-        urgents = [(c, c.matiere) for c in db2.query(models.Chapitre).all()
-                   if cfg.diff_jours(c.date_prochaine) <= 0]
-        urgents.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
-        db2.close()
+        
+        with db_session() as db2:
+            urgents = [(c, c.matiere) for c in db2.query(models.Chapitre).all()
+                       if cfg.diff_jours(c.date_prochaine) <= 0]
+            urgents.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
 
         if not urgents:
             st.success("🎉 Plus rien à réviser !")
-            st.session_state.show_session = False
-        else:
-            progress = st.progress(0)
-            for i, (chap, matiere) in enumerate(urgents):
-                pct = (i + 1) / len(urgents)
-                progress.progress(pct)
-
-                with st.container(border=True):
-                    st.markdown(f"### {i+1}. {chap.nom}")
-                    st.caption(f"📖 {matiere.nom} · Niveau {chap.niveau_actuel} · J+{cfg.INTERVALLES_J[min(chap.niveau_actuel, 13)]}")
-                    render_progress(chap.niveau_actuel)
-
-                    if chap.notes:
-                        st.info(chap.notes)
-
-                    col1, col2 = st.columns([1, 1])
-                    with col1:
-                        if st.button(f"✅ Valider — je connais", key=f"session_ok_{chap.uid}", width='stretch'):
-                            db = get_db()
-                            c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
-                            if c: revision_service.valider_chapitre(db, c)
-                            db.close()
-                            st.rerun()
-                    with col2:
-                        if st.button(f"📚 Pas encore — je repasse", key=f"session_ko_{chap.uid}", width='stretch'):
-                            pass  # skip, reste dans la liste
-
-            progress.empty()
             if st.button("Terminer la session", width='stretch'):
                 st.session_state.show_session = False
+                st.session_state.session_idx = 0
                 st.rerun()
+        else:
+            if "session_idx" not in st.session_state:
+                st.session_state.session_idx = 0
+            
+            # S'assurer que l'index est valide
+            if st.session_state.session_idx >= len(urgents):
+                st.session_state.session_idx = 0
+            
+            idx = st.session_state.session_idx
+            chap, matiere = urgents[idx]
+            
+            st.write(f"**Chapitre {idx + 1} sur {len(urgents)}**")
+            st.progress((idx + 1) / len(urgents))
+
+            with st.container(border=True):
+                st.markdown(f"### {chap.nom}")
+                st.caption(f"📖 {matiere.nom} · Niveau {chap.niveau_actuel} · J+{cfg.INTERVALLES_J[min(chap.niveau_actuel, 13)]}")
+                render_progress(chap.niveau_actuel)
+
+                if chap.notes:
+                    st.info(chap.notes)
+
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col1:
+                    if st.button(f"✅ Valider — je connais", key=f"session_ok_{chap.uid}", width='stretch', type="primary"):
+                        with db_session() as db:
+                            c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
+                            if c: revision_service.valider_chapitre(db, c)
+                        # L'élément est retiré des urgents, l'index pointe naturellement sur le suivant
+                        st.rerun()
+                with col2:
+                    if st.button(f"⏭️ Passer", key=f"session_skip_{chap.uid}", width='stretch'):
+                        st.session_state.session_idx += 1
+                        st.rerun()
+                with col3:
+                    if st.button(f"🛑 Arrêter", key="session_stop", width='stretch'):
+                        st.session_state.show_session = False
+                        st.session_state.session_idx = 0
+                        st.rerun()
+
+            if idx > 0:
+                if st.button("⬅️ Précédent", key="session_prev"):
+                    st.session_state.session_idx -= 1
+                    st.rerun()
 
 
 # ══════════════════════════════════════════════════════════
@@ -1104,25 +1106,24 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
     matiere_id = st.session_state.matiere_id
     matiere_nom = st.session_state.matiere_nom
 
-    db = get_db()
-    matiere = crud_service.obtenir_matiere(db, matiere_id)
-    if not matiere:
-        db.close()
-        st.error("Matière introuvable.")
-        naviguer("dashboard")
-        st.stop()
+    with db_session() as db:
+        matiere = crud_service.obtenir_matiere(db, matiere_id)
+        if not matiere:
+            st.error("Matière introuvable.")
+            naviguer("dashboard")
+            st.stop()
 
-    chapitres = crud_service.lister_chapitres(db, matiere_id,
-                                               st.session_state.get("filtre", "tous"),
-                                               st.session_state.get("sort", "date_asc"),
-                                               st.session_state.get("q_filtre", ""))
+        chapitres = crud_service.lister_chapitres(db, matiere_id,
+                                                   st.session_state.get("filtre", "tous"),
+                                                   st.session_state.get("sort", "date_asc"),
+                                                   st.session_state.get("q_filtre", ""))
 
-    nb_urg = sum(1 for c in chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
-    nb_mait = sum(1 for c in chapitres if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
-    niv_moy = sum(c.niveau_actuel for c in chapitres) / max(len(chapitres), 1)
+        nb_urg = sum(1 for c in chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
+        nb_mait = sum(1 for c in chapitres if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+        niv_moy = sum(c.niveau_actuel for c in chapitres) / max(len(chapitres), 1)
 
-    st.title(matiere_nom)
-    st.caption("Matière")
+        st.title(matiere_nom)
+        st.caption("Matière")
 
     # Stats bandeau
     cols = st.columns(4)
@@ -1183,44 +1184,39 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
         with st.expander("✏️ Renommer la matière", expanded=True):
             new_name = st.text_input("Nouveau nom", value=matiere_nom, key="rename_mat_input")
             if st.button("Renommer", key="rename_mat_btn") and new_name.strip() != matiere_nom:
-                db = get_db()
-                try:
-                    crud_service.renommer_matiere(db, matiere_id, new_name.strip())
-                    st.session_state.matiere_nom = new_name.strip()
-                    st.success("Renommé !")
-                    st.session_state.show_rename_mat = False
-                    db.close()
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
-                    db.close()
+                with db_session() as db:
+                    try:
+                        crud_service.renommer_matiere(db, matiere_id, new_name.strip())
+                        st.session_state.matiere_nom = new_name.strip()
+                        st.success("Renommé !")
+                        st.session_state.show_rename_mat = False
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
 
     # Delete matiere
     if st.session_state.get("show_delete_mat"):
         with st.expander("🗑️ Supprimer la matière", expanded=True):
             st.warning(f"Supprimer **{matiere_nom}** et ses {len(chapitres)} chapitres ? Cette action est IRRÉVERSIBLE.")
             if st.button("🗑️ Confirmer la suppression", key="delete_mat_btn", type="primary"):
-                db = get_db()
-                crud_service.supprimer_matiere(db, matiere_id)
-                db.close()
+                with db_session() as db:
+                    crud_service.supprimer_matiere(db, matiere_id)
                 st.success(f"Matière « {matiere_nom} » supprimée.")
                 naviguer("dashboard")
 
     # Assigner UE
     if st.session_state.get("show_assign_ue"):
         with st.expander("📁 Assigner à une UE", expanded=True):
-            db = get_db()
-            ues = crud_service.lister_ues(db)
-            db.close()
+            with db_session() as db:
+                ues = crud_service.lister_ues(db)
             ue_options = ["Aucune"] + [ue.nom for ue in ues]
             current_ue = matiere.ues[0].nom if matiere.ues else "Aucune"
             selected_ue = st.selectbox("UE", ue_options,
                                        index=ue_options.index(current_ue) if current_ue in ue_options else 0,
                                        key="assign_ue_select")
             if st.button("Appliquer", key="assign_ue_btn"):
-                db = get_db()
-                crud_service.assigner_matiere_a_ue(db, matiere_id, selected_ue if selected_ue != "Aucune" else None)
-                db.close()
+                with db_session() as db:
+                    crud_service.assigner_matiere_a_ue(db, matiere_id, selected_ue if selected_ue != "Aucune" else None)
                 st.success("UE assignée !")
                 st.session_state.show_assign_ue = False
                 st.rerun()
@@ -1234,24 +1230,21 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
             with tab1:
                 new_chap = st.text_input("Nom du chapitre", key="new_chap_simple")
                 if st.button("Ajouter", key="add_chap_simple") and new_chap.strip():
-                    db = get_db()
-                    try:
-                        crud_service.creer_chapitre(db, matiere_id, new_chap.strip())
-                        st.success(f"« {new_chap} » ajouté !")
-                        st.session_state.show_add_chap = False
-                        db.close()
-                        st.rerun()
-                    except ValueError as e:
-                        st.error(str(e))
-                        db.close()
+                    with db_session() as db:
+                        try:
+                            crud_service.creer_chapitre(db, matiere_id, new_chap.strip())
+                            st.success(f"« {new_chap} » ajouté !")
+                            st.session_state.show_add_chap = False
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
             with tab2:
                 batch_text = st.text_area("Un chapitre par ligne", height=120, key="batch_chaps")
                 if st.button(f"Ajouter {len([l for l in batch_text.split(chr(10)) if l.strip()])} chapitres", key="add_chap_batch"):
                     noms = [l.strip() for l in batch_text.split("\n") if l.strip()]
                     if noms:
-                        db = get_db()
-                        crud_service.creer_chapitres_batch(db, matiere_id, noms)
-                        db.close()
+                        with db_session() as db:
+                            crud_service.creer_chapitres_batch(db, matiere_id, noms)
                         st.success(f"{len(noms)} chapitres ajoutés !")
                         st.session_state.show_add_chap = False
                         st.rerun()
@@ -1282,8 +1275,6 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
     if not chapitres:
         st.info("📝 Aucun chapitre. Cliquez sur « Ajouter ».")
 
-    db.close()
-
 
 # ══════════════════════════════════════════════════════════
 # PAGE : STATISTIQUES
@@ -1292,74 +1283,72 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
 elif st.session_state.page == "stats":
     st.title("Statistiques")
 
-    db = get_db()
-    chapitres_all = db.query(models.Chapitre).all()
-    total = len(chapitres_all)
-    urgent = sum(1 for c in chapitres_all if cfg.diff_jours(c.date_prochaine) <= 0)
-    maitrise = sum(1 for c in chapitres_all if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
-    nb_matieres = db.query(models.Matiere).count()
-    pct_maitrise = int(maitrise / total * 100) if total > 0 else 0
+    with db_session() as db:
+        chapitres_all = db.query(models.Chapitre).all()
+        total = len(chapitres_all)
+        urgent = sum(1 for c in chapitres_all if cfg.diff_jours(c.date_prochaine) <= 0)
+        maitrise = sum(1 for c in chapitres_all if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+        nb_matieres = db.query(models.Matiere).count()
+        pct_maitrise = int(maitrise / total * 100) if total > 0 else 0
 
-    from models import Activite
-    act_items = sorted(
-        [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
-        key=lambda x: x[0], reverse=True,
-    )
-    auj = datetime.now().date()
-    streak = 0
-    for i in range(365):
-        d = (auj - timedelta(days=i)).strftime("%Y-%m-%d")
-        found = next((a for a in act_items if a[0] == d), None)
-        if found and found[1] > 0:
-            streak += 1
-        else:
-            break
+        from models import Activite
+        act_items = sorted(
+            [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
+            key=lambda x: x[0], reverse=True,
+        )
+        auj = datetime.now().date()
+        streak = 0
+        for i in range(365):
+            d = (auj - timedelta(days=i)).strftime("%Y-%m-%d")
+            found = next((a for a in act_items if a[0] == d), None)
+            if found and found[1] > 0:
+                streak += 1
+            else:
+                break
 
-    total_rev = sum(a[1] for a in act_items)
-    total_quiz_r = sum(a[2] for a in act_items)
-    total_quiz_e = sum(a[3] for a in act_items)
-    total_quiz = total_quiz_r + total_quiz_e
-    taux_quiz = int(total_quiz_r / max(total_quiz, 1) * 100)
+        total_rev = sum(a[1] for a in act_items)
+        total_quiz_r = sum(a[2] for a in act_items)
+        total_quiz_e = sum(a[3] for a in act_items)
+        total_quiz = total_quiz_r + total_quiz_e
+        taux_quiz = int(total_quiz_r / max(total_quiz, 1) * 100)
 
-    matieres = crud_service.lister_matieres(db)
+        matieres = crud_service.lister_matieres(db)
 
-    # Top stats
-    cols = st.columns(3)
-    with cols[0]:
-        st.metric("🔥 Streak", f"{streak} jours")
-    with cols[1]:
-        st.metric("🎯 Quiz réussis", f"{taux_quiz}%", delta=f"{total_quiz_r}/{total_quiz}")
-    with cols[2]:
-        st.metric("✅ Révisions total", total_rev)
+        # Top stats
+        cols = st.columns(3)
+        with cols[0]:
+            st.metric("🔥 Streak", f"{streak} jours")
+        with cols[1]:
+            st.metric("🎯 Quiz réussis", f"{taux_quiz}%", delta=f"{total_quiz_r}/{total_quiz}")
+        with cols[2]:
+            st.metric("✅ Révisions total", total_rev)
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # Par matière
-    st.subheader("📖 Par matière")
-    for m in matieres:
-        chaps = m.chapitres
-        if not chaps:
-            continue
-        urg = sum(1 for c in chaps if cfg.diff_jours(c.date_prochaine) <= 0)
-        mait = sum(1 for c in chaps if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
-        niv_moy = sum(c.niveau_actuel for c in chaps) / len(chaps)
-        quiz_t = sum(len(c.historique_quiz) for c in chaps)
-        quiz_c = sum(1 for c in chaps for h in c.historique_quiz if h.score >= 0.5)
+        # Par matière
+        st.subheader("📖 Par matière")
+        for m in matieres:
+            chaps = m.chapitres
+            if not chaps:
+                continue
+            urg = sum(1 for c in chaps if cfg.diff_jours(c.date_prochaine) <= 0)
+            mait = sum(1 for c in chaps if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+            niv_moy = sum(c.niveau_actuel for c in chaps) / len(chaps)
+            quiz_t = sum(len(c.historique_quiz) for c in chaps)
+            quiz_c = sum(1 for c in chaps for h in c.historique_quiz if h.score >= 0.5)
 
-        with st.container(border=True):
-            col1, col2, col3 = st.columns([3, 2, 1])
-            with col1:
-                st.markdown(f"📖 **{m.nom}**")
-                st.caption(f"{len(chaps)} ch. · 🔥 {urg} · 🏆 {mait} · Quiz {int(quiz_c/max(quiz_t,1)*100)}%")
-            with col2:
-                niv = int(niv_moy)
-                render_progress(niv, 13)
-                st.caption(f"Niv. moyen: {niv_moy:.1f}")
-            with col3:
-                if st.button("Ouvrir", key=f"stats_open_{m.id}"):
-                    naviguer("matiere", m.id, m.nom)
-
-    db.close()
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.markdown(f"📖 **{m.nom}**")
+                    st.caption(f"{len(chaps)} ch. · 🔥 {urg} · 🏆 {mait} · Quiz {int(quiz_c/max(quiz_t,1)*100)}%")
+                with col2:
+                    niv = int(niv_moy)
+                    render_progress(niv, 13)
+                    st.caption(f"Niv. moyen: {niv_moy:.1f}")
+                with col3:
+                    if st.button("Ouvrir", key=f"stats_open_{m.id}"):
+                        naviguer("matiere", m.id, m.nom)
 
     # Distribution des niveaux
     st.markdown("---")
@@ -1447,23 +1436,21 @@ elif st.session_state.page == "stats":
 elif st.session_state.page == "calendar":
     st.title("Calendrier des révisions")
 
-    db = get_db()
-    chapitres_all = db.query(models.Chapitre).all()
+    with db_session() as db:
+        chapitres_all = db.query(models.Chapitre).all()
 
-    auj = datetime.now().date()
-    from collections import defaultdict
+        auj = datetime.now().date()
+        from collections import defaultdict
 
-    par_jour = defaultdict(list)
-    for c in chapitres_all:
-        try:
-            d = datetime.strptime(c.date_prochaine, "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        diff = (d - auj).days
-        if -7 <= diff <= 30:
-            par_jour[c.date_prochaine].append((c, diff, c.matiere.nom if c.matiere else "?"))
-
-    db.close()
+        par_jour = defaultdict(list)
+        for c in chapitres_all:
+            try:
+                d = datetime.strptime(c.date_prochaine, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            diff = (d - auj).days
+            if -7 <= diff <= 30:
+                par_jour[c.date_prochaine].append((c, diff, c.matiere.nom if c.matiere else "?"))
 
     if not par_jour:
         st.info("📅 Aucune révision prévue dans les 30 prochains jours.")
@@ -1493,13 +1480,10 @@ elif st.session_state.page == "calendar":
                         render_progress(chap.niveau_actuel)
                     with col2:
                         if st.button("Ouvrir", key=f"cal_{chap.uid}"):
-                            db3 = get_db()
-                            mat = db3.query(models.Matiere).filter(models.Matiere.nom == mat_nom).first()
-                            if mat:
-                                db3.close()
-                                naviguer("matiere", mat.id, mat.nom)
-                            else:
-                                db3.close()
+                            with db_session() as db3:
+                                mat = db3.query(models.Matiere).filter(models.Matiere.nom == mat_nom).first()
+                                if mat:
+                                    naviguer("matiere", mat.id, mat.nom)
 
 # ══════════════════════════════════════════════════════════
 # PAGE : EXAMEN BLANC
@@ -1513,13 +1497,13 @@ elif st.session_state.page == "examen":
     if not ia:
         st.warning("\u26a0\ufe0f Configure ta cl\u00e9 API DeepSeek dans les \u2699\ufe0f Param\u00e8tres pour utiliser l'examen blanc.")
     else:
-        # R\u00e9cup\u00e9rer les chapitres avec texte cache (PDF analys\u00e9s)
-        db = get_db()
-        chaps_avec_texte = [
-            (c, c.matiere.nom) for c in db.query(models.Chapitre).all()
-            if c.texte_cache and c.texte_cache.strip()
-        ]
-        db.close()
+        # Récupérer les chapitres avec texte cache (PDF analysés)
+        with db_session() as db:
+            chaps_avec_texte = [
+                (c, c.matiere.nom) for c in db.query(models.Chapitre).all()
+                if c.texte_cache and c.texte_cache.strip()
+            ]
+
 
         if len(chaps_avec_texte) < 2:
             st.info("\U0001f4c4 Il faut au moins 2 chapitres avec des PDF analys\u00e9s pour g\u00e9n\u00e9rer un examen.\n\n"
@@ -1576,25 +1560,36 @@ elif st.session_state.page == "examen":
                                 questions, reponses,
                                 st.session_state.get("exam_contexte", ""),
                             )
-                            score = eval_result.get("score_num", 0)
-                            verdict = eval_result.get("verdict", "?")
-
-                            st.markdown("---")
-                            st.markdown(f"## \U0001f3af R\u00e9sultat : {int(score * 100)}%")
-                            if verdict == "r\u00e9ussi":
-                                st.success(f"\u2705 **{verdict.upper()}** — Bravo !")
-                            else:
-                                st.warning(f"\U0001f4da **{verdict.upper()}** — Continue \u00e0 r\u00e9viser.")
-
-                            st.markdown(eval_result.get("message", ""))
-                            st.markdown("### D\u00e9tail par question :")
-                            for j, r in enumerate(eval_result.get("resultats", [])):
-                                emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
-                                st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
-
-                            st.balloons() if score >= 0.7 else None
+                            st.session_state.last_exam_eval = eval_result
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Erreur IA : {e}")
+
+                if "last_exam_eval" in st.session_state:
+                    res = st.session_state.last_exam_eval
+                    score = res.get("score_num", 0)
+                    verdict = res.get("verdict", "?")
+
+                    st.markdown("---")
+                    st.markdown(f"## \U0001f3af R\u00e9sultat : {int(score * 100)}%")
+                    if verdict == "r\u00e9ussi":
+                        st.success(f"\u2705 **{verdict.upper()}** — Bravo !")
+                    else:
+                        st.warning(f"\U0001f4da **{verdict.upper()}** — Continue \u00e0 r\u00e9viser.")
+
+                    st.markdown(res.get("message", ""))
+                    st.markdown("### D\u00e9tail par question :")
+                    for j, r in enumerate(res.get("resultats", [])):
+                        emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
+                        st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
+
+                    if score >= 0.7:
+                        st.balloons()
+                    
+                    if st.button("Nouvel examen", key="reset_exam"):
+                        st.session_state.exam_generated = False
+                        del st.session_state.last_exam_eval
+                        st.rerun()
             elif st.session_state.get("exam_generated"):
                 st.success(f"\u2705 {len(st.session_state.exam_questions)} questions g\u00e9n\u00e9r\u00e9es ! R\u00e9ponds ci-dessus.")
 

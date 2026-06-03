@@ -84,7 +84,7 @@ class Chapitre(Base):
 
     # Répétition espacée
     niveau_actuel = Column(Integer, default=0)
-    date_prochaine = Column(String(10), default=datetime.now().strftime("%Y-%m-%d"))
+    date_prochaine = Column(String(10), default=lambda: datetime.now().strftime("%Y-%m-%d"))
 
     # Fichiers & liens
     fichiers_attaches = Column(JSON, default=list)  # [{"nom": "...", "chemin": "..."}, ...]

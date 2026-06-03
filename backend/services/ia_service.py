@@ -154,6 +154,13 @@ Liste numérotée UNIQUEMENT :
 
         return self._appel_ia_avec_timeout(_appel)
 
+    def _extraire_json(self, texte: str) -> str:
+        """Extrait le bloc JSON d'une chaîne (gère les backticks et le texte autour)."""
+        match = re.search(r"(\{.*\}|\[.*\])", texte, re.DOTALL)
+        if match:
+            return match.group(0)
+        return texte
+
     def generer_qcm(self, nom_chap, matiere, contexte, nb=5):
         ctx = f"\nContenu :\n{contexte[:40000]}" if contexte.strip() else ""
         prompt = f"""Génère {nb} QCM sur « {nom_chap} » ({matiere}).
@@ -170,8 +177,7 @@ Format STRICT JSON (sans backticks) :
                     {"role": "user", "content": prompt},
                 ],
             )
-            brut = re.sub(r"^```[a-z]*\n?", "", resp.choices[0].message.content.strip())
-            brut = re.sub(r"\n?```$", "", brut)
+            brut = self._extraire_json(resp.choices[0].message.content.strip())
             try:
                 return json.loads(brut)
             except json.JSONDecodeError as e:
@@ -203,8 +209,7 @@ JSON UNIQUEMENT :
                     {"role": "user", "content": prompt},
                 ],
             )
-            brut = re.sub(r"^```[a-z]*\n?", "", resp.choices[0].message.content.strip())
-            brut = re.sub(r"\n?```$", "", brut)
+            brut = self._extraire_json(resp.choices[0].message.content.strip())
             try:
                 data = json.loads(brut)
             except json.JSONDecodeError as e:
