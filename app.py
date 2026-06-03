@@ -883,7 +883,7 @@ if st.session_state.page == "dashboard":
     # Streak
     from models import Activite
     act_items = sorted(
-        [(a.date, a.revisions or 0) for a in db.query(Activite).all()],
+        [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
         key=lambda x: x[0], reverse=True,
     )
     auj = datetime.now().date()
@@ -933,7 +933,7 @@ if st.session_state.page == "dashboard":
         badges_html += '<span class="badge-silver">\U0001f4dd 20 chapitres cr\u00e9\u00e9s</span>'
     if total >= 5:
         badges_html += '<span class="badge-bronze">\U0001f4dd 5 chapitres cr\u00e9\u00e9s</span>'
-    quiz_total = sum(a.quiz_reussis or 0 for a in act_items) + sum(a.quiz_echoues or 0 for a in act_items)
+    quiz_total = sum(a[2] for a in act_items) + sum(a[3] for a in act_items)
     if quiz_total >= 10:
         badges_html += '<span class="badge-silver">\U0001f3af 10 quiz pass\u00e9s</span>'
     badges_html += '</div>'
