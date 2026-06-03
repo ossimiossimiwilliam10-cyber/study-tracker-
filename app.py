@@ -632,7 +632,7 @@ with st.sidebar:
     if not matieres:
         st.caption("Aucune matière")
 
-    if st.button("＋ Nouvelle matière", use_container_width=True):
+    if st.button("\uff0b Nouveau (mati\u00e8re ou UE)", use_container_width=True):
         st.session_state.show_new_mat = True
 
     db.close()
