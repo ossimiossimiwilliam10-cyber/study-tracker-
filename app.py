@@ -584,16 +584,43 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Liste des matières
+    # Liste des matières (groupées par UE)
     st.markdown("**Matières**")
     db = get_db()
     matieres = crud_service.lister_matieres(db)
+    ues = crud_service.lister_ues(db)
 
-    for m in matieres:
+    # Matières avec UE
+    assignees = set()
+    for ue in ues:
+        ue_matieres = [m for m in ue.matieres if m.nom in [x.nom for x in matieres]]
+        if not ue_matieres:
+            continue
+        with st.container():
+            st.markdown(f"📁 **{ue.nom}**")
+            for m in ue_matieres:
+                assignees.add(m.id)
+                urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    if st.button(f"   📖 {m.nom[:22]}", key=f"side_{m.id}", use_container_width=True,
+                                 type="primary" if st.session_state.matiere_id == m.id else "secondary"):
+                        naviguer("matiere", m.id, m.nom)
+                with col2:
+                    if urg > 0:
+                        st.markdown(f'<span class="urgent-badge">{urg}</span>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<span class="count-badge">{len(m.chapitres)}</span>', unsafe_allow_html=True)
+
+    # Matières sans UE
+    sans_ue = [m for m in matieres if m.id not in assignees]
+    if ues and sans_ue:
+        st.caption("Autres matières")
+    for m in sans_ue:
         urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
         col1, col2 = st.columns([5, 1])
         with col1:
-            if st.button(f"📖 {m.nom[:25]}", key=f"side_{m.id}", use_container_width=True,
+            if st.button(f"📖 {m.nom[:25]}", key=f"side_noue_{m.id}", use_container_width=True,
                          type="primary" if st.session_state.matiere_id == m.id else "secondary"):
                 naviguer("matiere", m.id, m.nom)
         with col2:
