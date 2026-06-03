@@ -915,7 +915,6 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
     nb_urg = sum(1 for c in chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
     nb_mait = sum(1 for c in chapitres if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
     niv_moy = sum(c.niveau_actuel for c in chapitres) / max(len(chapitres), 1)
-    db.close()
 
     st.title(matiere_nom)
     st.caption("Matière")
@@ -1077,6 +1076,8 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
 
     if not chapitres:
         st.info("📝 Aucun chapitre. Cliquez sur « Ajouter ».")
+
+    db.close()
 
 
 # ══════════════════════════════════════════════════════════
