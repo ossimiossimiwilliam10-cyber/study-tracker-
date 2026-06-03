@@ -1,11 +1,16 @@
-"""Configuration de la base de données SQLAlchemy."""
+"""Configuration de la base de données SQLAlchemy (SQLite local / PostgreSQL Supabase)."""
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# PostgreSQL n'accepte pas check_same_thread (SQLite only)
+connect_args = {}
+if "sqlite" in DATABASE_URL:
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -14,7 +19,7 @@ class Base(DeclarativeBase):
 
 
 def get_db():
-    """Dépendance FastAPI : fournit une session BDD par requête."""
+    """Retourne une session BDD."""
     db = SessionLocal()
     try:
         yield db
