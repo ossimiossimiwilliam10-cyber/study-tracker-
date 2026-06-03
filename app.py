@@ -47,10 +47,21 @@ def db_session():
         db.close()
 
 def _get_theme():
-    """Lit le thème depuis la BDD. Défaut: dark."""
+    """Lit le thème depuis la BDD. 'auto' = suit l'OS."""
     with db_session() as db:
         param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
-        return param.valeur if param and param.valeur else "dark"
+        theme = param.valeur if param and param.valeur else "dark"
+    if theme == "auto":
+        # Détecter la préférence OS via JavaScript injecté
+        return "dark"  # fallback, sera mis à jour par le JS
+    return theme
+
+def _get_effective_theme():
+    """Retourne le thème effectif (dark/light), résout 'auto'."""
+    theme = st.session_state.get("theme", "dark")
+    if theme == "auto":
+        return st.session_state.get("os_theme", "dark")
+    return theme
 
 def _set_theme(theme: str):
     """Sauvegarde le thème en BDD."""
@@ -422,6 +433,11 @@ def _render_chapitre(chap, matiere_id):
         if chap.fiche_ia:
             with st.expander("\U0001f9e0 Voir la fiche de r\u00e9vision"):
                 st.markdown(chap.fiche_ia)
+                # Export PDF
+                fiche_html = f"<html><head><meta charset='utf-8'><style>body{{font-family:Segoe UI;max-width:800px;margin:40px auto;line-height:1.6;color:#1a1a1a}}h2{{color:#7c3aed}}strong{{color:#2563eb}}</style></head><body>{chap.fiche_ia.replace(chr(10),'<br>')}</body></html>"
+                st.download_button("\U0001f4e5 T\u00e9l\u00e9charger en HTML", fiche_html,
+                                   f"fiche_{chap.nom[:20]}.html", "text/html",
+                                   key=f"dl_fiche_{chap.uid}")
 
         # ── Quiz interactif ──
         if chap.quiz_cache:
@@ -789,22 +805,25 @@ def show_settings_dialog():
     with db_session() as db:
         param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
         cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
+        param_obj = db.query(models.Parametre).filter(models.Parametre.cle == "objectif_quotidien").first()
+        obj_actuel = int(param_obj.valeur) if param_obj and param_obj.valeur else 5
+        param_theme = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+        theme_actuel = param_theme.valeur if param_theme and param_theme.valeur else "dark"
     ia = get_ia()
 
-    st.markdown("### \U0001f9e0 Intelligence Artificielle (DeepSeek)")
-    if ia:
-        st.success("\u2705 IA connect\u00e9e et pr\u00eate !")
-        st.caption("Fiches de r\u00e9vision, quiz, QCM et flashcards disponibles pour les chapitres avec PDF.")
-    else:
-        st.warning("\u26a0\ufe0f Cl\u00e9 API DeepSeek non configur\u00e9e.")
-        st.caption("Cr\u00e9e ta cl\u00e9 sur [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)")
+    tab1, tab2 = st.tabs(["\U0001f9e0 IA", "\U0001f3af Objectifs & Th\u00e8me"])
 
-    new_key = st.text_input("Cl\u00e9 API DeepSeek", value=cle_actuelle, type="password",
-                            placeholder="sk-...", key="settings_api_key")
+    with tab1:
+        st.markdown("### Intelligence Artificielle (DeepSeek)")
+        if ia:
+            st.success("\u2705 IA connect\u00e9e et pr\u00eate !")
+        else:
+            st.warning("\u26a0\ufe0f Cl\u00e9 API DeepSeek non configur\u00e9e.")
+            st.caption("Cr\u00e9e ta cl\u00e9 sur [platform.deepseek.com](https://platform.deepseek.com/api_keys)")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("\U0001f4be Sauvegarder", width='stretch', use_container_width=True):
+        new_key = st.text_input("Cl\u00e9 API DeepSeek", value=cle_actuelle, type="password",
+                                placeholder="sk-...", key="settings_api_key")
+        if st.button("\U0001f4be Sauvegarder la cl\u00e9", width='stretch'):
             with db_session() as db2:
                 p = db2.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
                 if not p:
@@ -817,10 +836,39 @@ def show_settings_dialog():
                 st.session_state.ia_service.cle_api = new_key.strip()
             st.success("Cl\u00e9 API sauvegard\u00e9e !")
             st.rerun()
-    with col2:
-        if st.button("Fermer", width='stretch', use_container_width=True):
-            st.session_state.show_settings = False
+
+    with tab2:
+        st.markdown("### \U0001f3af Objectif quotidien")
+        new_obj = st.number_input("Nombre de r\u00e9visions par jour", min_value=1, max_value=50, value=obj_actuel)
+        if st.button("\U0001f4be Sauvegarder l'objectif", width='stretch'):
+            with db_session() as db2:
+                po = db2.query(models.Parametre).filter(models.Parametre.cle == "objectif_quotidien").first()
+                if not po:
+                    po = models.Parametre(cle="objectif_quotidien", valeur=str(new_obj))
+                    db2.add(po)
+                else:
+                    po.valeur = str(new_obj)
+                db2.commit()
+            st.success(f"Objectif : {new_obj} r\u00e9visions/jour")
             st.rerun()
+
+        st.markdown("### \U0001f313 Th\u00e8me")
+        new_theme = st.selectbox("Th\u00e8me", ["dark", "light", "auto"],
+                                 format_func=lambda x: {"dark": "\U0001f31a Sombre", "light": "\u2600\ufe0f Clair", "auto": "\U0001f4f1 Auto (suit l'OS)"}[x],
+                                 index=["dark","light","auto"].index(theme_actuel) if theme_actuel in ["dark","light","auto"] else 0)
+        if st.button("\U0001f4be Appliquer le th\u00e8me", width='stretch'):
+            with db_session() as db2:
+                pt = db2.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+                if pt: pt.valeur = new_theme
+                else: db2.add(models.Parametre(cle="theme", valeur=new_theme))
+                db2.commit()
+            st.session_state.theme = new_theme
+            st.success(f"Th\u00e8me : {new_theme}")
+            st.rerun()
+
+    if st.button("Fermer", width='stretch'):
+        st.session_state.show_settings = False
+        st.rerun()
 
 if st.session_state.get("show_settings"):
     show_settings_dialog()
@@ -938,6 +986,17 @@ if st.session_state.page == "dashboard":
     badges_html += '</div>'
     if "badge-gold" in badges_html or "badge-silver" in badges_html or "badge-bronze" in badges_html:
         st.markdown(badges_html, unsafe_allow_html=True)
+
+    # Objectif quotidien
+    with db_session() as db_o:
+        obj_param = db_o.query(models.Parametre).filter(models.Parametre.cle == "objectif_quotidien").first()
+        obj_val = int(obj_param.valeur) if obj_param and obj_param.valeur else 5
+    revs_auj = sum(a[1] for a in act_items if a[0] == datetime.now().strftime("%Y-%m-%d"))
+    obj_pct = min(1.0, revs_auj / obj_val) if obj_val > 0 else 0
+    if revs_auj >= obj_val:
+        st.success(f"\U0001f3af Objectif du jour atteint : {revs_auj}/{obj_val} r\u00e9visions ! \U0001f389")
+    else:
+        st.progress(obj_pct, text=f"\U0001f3af Objectif : {revs_auj}/{obj_val} r\u00e9visions aujourd'hui")
 
     # Banni\u00e8re urgente anim\u00e9e
     if urgent > 0:
@@ -1359,6 +1418,36 @@ elif st.session_state.page == "stats":
                     if st.button("Ouvrir", key=f"stats_open_{m.id}"):
                         naviguer("matiere", m.id, m.nom)
 
+    # Par UE
+    ues = db.query(models.UE).order_by(models.UE.nom).all()
+    if ues:
+        st.markdown("---")
+        st.subheader("\U0001f4c1 Par UE")
+        for ue in ues:
+            ue_matieres = ue.matieres
+            if not ue_matieres:
+                continue
+            ue_chaps = [c for m in ue_matieres for c in m.chapitres]
+            if not ue_chaps:
+                continue
+            ue_total = len(ue_chaps)
+            ue_urg = sum(1 for c in ue_chaps if cfg.diff_jours(c.date_prochaine) <= 0)
+            ue_mait = sum(1 for c in ue_chaps if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+            ue_niv = sum(c.niveau_actuel for c in ue_chaps) / ue_total
+            ue_quiz_t = sum(len(c.historique_quiz) for c in ue_chaps)
+            ue_quiz_c = sum(1 for c in ue_chaps for h in c.historique_quiz if h.score >= 0.5)
+
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([3, 2, 1])
+                with col1:
+                    st.markdown(f"\U0001f4c1 **{ue.nom}**")
+                    st.caption(f"{len(ue_matieres)} mat. · {ue_total} ch. · \U0001f525 {ue_urg} · \U0001f3c6 {ue_mait} · Quiz {int(ue_quiz_c/max(ue_quiz_t,1)*100)}%")
+                with col2:
+                    render_progress(int(ue_niv), 13)
+                    st.caption(f"Niv. moyen: {ue_niv:.1f}")
+                with col3:
+                    pass
+
     # Distribution des niveaux
     st.markdown("---")
     st.subheader("📊 Distribution des niveaux")
@@ -1605,3 +1694,50 @@ elif st.session_state.page == "examen":
 
 st.markdown("---")
 st.caption("StudyTracker V2 — App de révision espacée  ·  Propulsé par Streamlit")
+
+# ── Raccourcis clavier + Détection OS thème ──
+st.markdown("""
+<script>
+// Détecter le thème OS pour le mode 'auto'
+const osDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const themeMeta = document.querySelector('meta[name="os-theme"]');
+if (!themeMeta) {
+    const meta = document.createElement('meta');
+    meta.name = 'os-theme';
+    meta.content = osDark ? 'dark' : 'light';
+    document.head.appendChild(meta);
+}
+
+// Raccourcis clavier
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'Enter') {
+        // Ctrl+Entrée : cliquer le premier bouton "Valider" visible
+        const btns = document.querySelectorAll('button');
+        for (const b of btns) {
+            if (b.textContent.includes('Valider')) { b.click(); break; }
+        }
+    }
+    if (e.ctrlKey && e.key === 'n') {
+        // Ctrl+N : cliquer "＋ Ajouter" ou "＋ Nouveau"
+        const btns = document.querySelectorAll('button');
+        for (const b of btns) {
+            if (b.textContent.includes('Ajouter') || b.textContent.includes('Nouveau')) { b.click(); break; }
+        }
+    }
+    if (e.ctrlKey && e.key === 's') {
+        // Ctrl+S : cliquer "Sauvegarder" (notes, settings)
+        const btns = document.querySelectorAll('button');
+        for (const b of btns) {
+            if (b.textContent.includes('Sauvegarder')) { b.click(); break; }
+        }
+    }
+    if (e.ctrlKey && e.key === 'f') {
+        // Ctrl+F : focus sur le champ recherche
+        const inputs = document.querySelectorAll('input[type="text"]');
+        for (const inp of inputs) {
+            if (inp.placeholder && inp.placeholder.includes('Rechercher')) { inp.focus(); break; }
+        }
+    }
+});
+</script>
+""", unsafe_allow_html=True)
