@@ -885,8 +885,17 @@ if st.session_state.page == "dashboard":
             [(a.date, a.revisions or 0, a.quiz_reussis or 0, a.quiz_echoues or 0) for a in db.query(Activite).all()],
             key=lambda x: x[0], reverse=True,
         )
-    
-    auj = datetime.now().date()
+        auj = datetime.now().date()
+        streak = 0
+        for i in range(365):
+            d = (auj - timedelta(days=i)).strftime("%Y-%m-%d")
+            found = next((a for a in act_items if a[0] == d), None)
+            if found and found[1] > 0:
+                streak += 1
+            else:
+                break
+
+    db.close()
 
     pct_maitrise = int(maitrise / total * 100) if total > 0 else 0
 

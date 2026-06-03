@@ -146,6 +146,10 @@ def lister_chapitres(
         .order_by(Chapitre.ordre, Chapitre.nom)
         .all()
     )
+    # Forcer le chargement des relations pour éviter DetachedInstanceError
+    for c in chapitres:
+        _ = c.historique_quiz
+        _ = c.matiere
 
     # Filtre par statut
     if filtre_statut == "urgent":
