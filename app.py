@@ -31,27 +31,78 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# CSS minimal pour le thème dark/light
-DARK_CSS = """
+
+# ══════════════════════════════════════════════════════════
+# THÈME DYNAMIQUE (dark / light)
+# ══════════════════════════════════════════════════════════
+
+def _get_theme():
+    """Lit le thème depuis la BDD. Défaut: dark."""
+    db = get_db()
+    param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+    db.close()
+    return param.valeur if param and param.valeur else "dark"
+
+def _set_theme(theme: str):
+    """Sauvegarde le thème en BDD."""
+    db = get_db()
+    param = db.query(models.Parametre).filter(models.Parametre.cle == "theme").first()
+    if param:
+        param.valeur = theme
+    else:
+        db.add(models.Parametre(cle="theme", valeur=theme))
+    db.commit()
+    db.close()
+
+if "theme" not in st.session_state:
+    st.session_state.theme = _get_theme()
+
+def _theme_css():
+    """Génère le CSS selon le thème actuel."""
+    if st.session_state.theme == "dark":
+        return """
+        <style>
+            .stApp { background-color: #08090e; }
+            .urgent-badge { background: #f87171; color: white; border-radius: 10px; padding: 2px 10px; font-size: 0.7rem; font-weight: bold; }
+            .count-badge { color: #64748b; font-size: 0.7rem; }
+            h1, h2, h3, p, span { color: #e2e8f0 !important; }
+            .stMetric label, .stMetric [data-testid="stMetricLabel"] { color: #64748b !important; }
+            .stMetric [data-testid="stMetricValue"] { color: #e2e8f0 !important; }
+            .stButton > button { border-radius: 8px !important; }
+            section[data-testid="stSidebar"] { background-color: #0c0d14; border-right: 1px solid #1f2335; }
+            section[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
+        </style>"""
+    else:
+        return """
+        <style>
+            .stApp { background-color: #f8fafc; }
+            .urgent-badge { background: #ef4444; color: white; border-radius: 10px; padding: 2px 10px; font-size: 0.7rem; font-weight: bold; }
+            .count-badge { color: #64748b; font-size: 0.7rem; }
+            h1, h2, h3, p, span { color: #0f172a !important; }
+            .stMetric label, .stMetric [data-testid="stMetricLabel"] { color: #64748b !important; }
+            .stMetric [data-testid="stMetricValue"] { color: #0f172a !important; }
+            .stButton > button { border-radius: 8px !important; }
+            section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e2e8f0; }
+            section[data-testid="stSidebar"] * { color: #0f172a !important; }
+        </style>"""
+
+st.markdown(_theme_css(), unsafe_allow_html=True)
+
+# ── CSS bonus (badges, animations, mobile) ──
+st.markdown("""
 <style>
-    /* Thème sombre forcé via le config.toml de Streamlit Cloud ou manuellement */
-    .stApp { background-color: #08090e; }
-    .card { background: #12141e; border: 1px solid #1f2335; border-radius: 12px; padding: 16px; margin-bottom: 8px; }
-    .urgent-badge { background: #f87171; color: white; border-radius: 10px; padding: 2px 10px; font-size: 0.7rem; font-weight: bold; }
-    .count-badge { color: #64748b; font-size: 0.7rem; }
-    h1, h2, h3, p, span { color: #e2e8f0 !important; }
-    .stMetric label, .stMetric [data-testid="stMetricLabel"] { color: #64748b !important; }
-    .stMetric [data-testid="stMetricValue"] { color: #e2e8f0 !important; font-size: 1.8rem !important; }
-    .stProgress > div > div { background-color: #34d399 !important; }
-    .stButton > button { border-radius: 8px !important; font-size: 0.85rem !important; }
-    .st-emotion-cache-1qg05tj { font-size: 0.8rem !important; }
-    .st-emotion-cache-1ny7cjd { background-color: #0c0d14 !important; }
-    section[data-testid="stSidebar"] { background-color: #0c0d14; border-right: 1px solid #1f2335; }
-    section[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-    .st-emotion-cache-1v0mbdj img { display: none; }
+    .big-badge { background: linear-gradient(135deg, #f87171, #fb923c); color: white; border-radius: 14px; padding: 10px 24px; font-size: 1.2rem; font-weight: bold; animation: pulse 2s infinite; }
+    .badge-gold { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #1a1a1a; border-radius: 10px; padding: 4px 14px; font-size: 0.8rem; font-weight: bold; display: inline-block; margin: 3px; }
+    .badge-silver { background: linear-gradient(135deg, #94a3b8, #64748b); color: white; border-radius: 10px; padding: 4px 14px; font-size: 0.8rem; font-weight: bold; display: inline-block; margin: 3px; }
+    .badge-bronze { background: linear-gradient(135deg, #fb923c, #d97706); color: white; border-radius: 10px; padding: 4px 14px; font-size: 0.8rem; font-weight: bold; display: inline-block; margin: 3px; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
+    @keyframes bounce { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-6px); } }
+    @media (max-width: 768px) {
+        section[data-testid="stSidebar"] { width: 100% !important; position: relative !important; height: auto !important; }
+        .stApp .stMain { margin-left: 0 !important; }
+    }
 </style>
-"""
-st.markdown(DARK_CSS, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -436,6 +487,63 @@ def _render_chapitre(chap, matiere_id):
                         st.markdown(f"{emoji} **Q{i+1}** : {correct} — {q_data.get('explication', '')}")
                     st.rerun()
 
+        # ── Flashcards IA ──
+        if ia and fichiers:
+            if not chap.quiz_cache and not chap.qcm_cache:
+                if st.button("\U0001f4c7 G\u00e9n\u00e9rer des flashcards", key=f"gen_flash_{chap.uid}"):
+                    with st.spinner("\U0001f9e0 DeepSeek cr\u00e9e les flashcards..."):
+                        try:
+                            texte_concat = chap.texte_cache or ""
+                            if not texte_concat:
+                                all_text = ""
+                                for f in fichiers:
+                                    chemin_f = f.get("chemin", "")
+                                    if chemin_f and os.path.exists(chemin_f):
+                                        texte, _ = ia.extraire_texte_pdf(chemin_f)
+                                        all_text += texte + "\n\n"
+                                texte_concat = all_text
+                            flashcards_prompt = f"G\u00e9n\u00e8re 8 flashcards recto/verso pour \u00ab {chap.nom} \u00bb.\nJSON UNIQUEMENT : [{{\"recto\":\"question ou concept\",\"verso\":\"r\u00e9ponse ou d\u00e9finition\"}}]\n\nDOCUMENT :\n{texte_concat[:50000]}"
+                            resp = ia._client().chat.completions.create(
+                                model=cfg.DEEPSEEK_MODEL,
+                                messages=[{"role":"system","content":"JSON valide uniquement."},
+                                          {"role":"user","content":flashcards_prompt}],
+                            )
+                            import re as _re, json as _json
+                            brut = _re.sub(r"^```[a-z]*\n?","",resp.choices[0].message.content.strip())
+                            brut = _re.sub(r"\n?```$","",brut)
+                            cards = _json.loads(brut)
+                            st.session_state[f"flashcards_{chap.uid}"] = cards
+                            st.success(f"{len(cards)} flashcards g\u00e9n\u00e9r\u00e9es !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+        if f"flashcards_{chap.uid}" in st.session_state:
+            cards = st.session_state[f"flashcards_{chap.uid}"]
+            if f"flash_idx_{chap.uid}" not in st.session_state:
+                st.session_state[f"flash_idx_{chap.uid}"] = 0
+            idx = st.session_state[f"flash_idx_{chap.uid}"]
+            if 0 <= idx < len(cards):
+                with st.expander(f"\U0001f4c7 Flashcards ({idx+1}/{len(cards)})"):
+                    card = cards[idx]
+                    st.markdown(f"### \U0001f4d6 {card.get('recto','')}")
+                    with st.expander("Voir la r\u00e9ponse"):
+                        st.success(card.get('verso',''))
+                    col_f1, col_f2, col_f3 = st.columns([1,1,1])
+                    with col_f1:
+                        if idx > 0 and st.button("\u25c0 Pr\u00e9c\u00e9dent", key=f"flash_prev_{chap.uid}"):
+                            st.session_state[f"flash_idx_{chap.uid}"] -= 1
+                            st.rerun()
+                    with col_f2:
+                        st.caption(f"{idx+1}/{len(cards)}")
+                    with col_f3:
+                        if idx < len(cards)-1 and st.button("Suivant \u25b6", key=f"flash_next_{chap.uid}"):
+                            st.session_state[f"flash_idx_{chap.uid}"] += 1
+                            st.rerun()
+                    if st.button("\U0001f504 Recommencer", key=f"flash_reset_{chap.uid}"):
+                        st.session_state[f"flash_idx_{chap.uid}"] = 0
+                        st.rerun()
+
         with st.expander("\u2699\ufe0f Actions"):
             ac1, ac2, ac3, ac4, ac5, ac6, ac7, ac8 = st.columns(8)
             with ac1:
@@ -562,6 +670,9 @@ with st.sidebar:
     if st.button("📅 Calendrier", use_container_width=True,
                  type="primary" if st.session_state.page == "calendar" else "secondary"):
         naviguer("calendar")
+    if st.button("\U0001f393 Examen blanc", use_container_width=True,
+                 type="primary" if st.session_state.page == "examen" else "secondary"):
+        naviguer("examen")
 
     st.markdown("---")
 
@@ -640,11 +751,18 @@ with st.sidebar:
     st.markdown("---")
 
     # Actions rapides
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
+        theme_icon = "\u2600\ufe0f" if st.session_state.theme == "dark" else "\U0001f319"
+        if st.button(f"{theme_icon} Th\u00e8me", use_container_width=True, help="Basculer dark/light"):
+            nouveau = "light" if st.session_state.theme == "dark" else "dark"
+            st.session_state.theme = nouveau
+            _set_theme(nouveau)
+            st.rerun()
+    with col2:
         if st.button("\u2699\ufe0f Param\u00e8tres", use_container_width=True):
             st.session_state.show_settings = True
-    with col2:
+    with col3:
         if st.button("\u21a9\ufe0f Undo", use_container_width=True):
             try:
                 db2 = get_db()
@@ -795,9 +913,34 @@ if st.session_state.page == "dashboard":
     with cols[3]:
         st.metric("🏆 Maîtrise", f"{pct_maitrise}%")
 
-    # Streak
+    # Streak + Badges
     if streak > 0:
-        st.info(f"🔥 **{streak} jours** consécutifs de révision !")
+        st.info(f"\U0001f525 **{streak} jours** cons\u00e9cutifs de r\u00e9vision !")
+
+    # Badges de r\u00e9ussite
+    badges_html = '<div style="margin:8px 0">'
+    if streak >= 7:
+        badges_html += '<span class="badge-gold">\U0001f3c5 7 jours de streak</span>'
+    if streak >= 30:
+        badges_html += '<span class="badge-gold">\U0001f451 30 jours de streak</span>'
+    if maitrise >= 10:
+        badges_html += '<span class="badge-silver">\U0001f4da 10 chapitres ma\u00eetris\u00e9s</span>'
+    if maitrise >= 25:
+        badges_html += '<span class="badge-gold">\U0001f4da 25 chapitres ma\u00eetris\u00e9s</span>'
+    if total >= 20:
+        badges_html += '<span class="badge-silver">\U0001f4dd 20 chapitres cr\u00e9\u00e9s</span>'
+    if total >= 5:
+        badges_html += '<span class="badge-bronze">\U0001f4dd 5 chapitres cr\u00e9\u00e9s</span>'
+    quiz_total = sum(a.quiz_reussis or 0 for a in act_items) + sum(a.quiz_echoues or 0 for a in act_items)
+    if quiz_total >= 10:
+        badges_html += '<span class="badge-silver">\U0001f3af 10 quiz pass\u00e9s</span>'
+    badges_html += '</div>'
+    if "badge-gold" in badges_html or "badge-silver" in badges_html or "badge-bronze" in badges_html:
+        st.markdown(badges_html, unsafe_allow_html=True)
+
+    # Banni\u00e8re urgente anim\u00e9e
+    if urgent > 0:
+        st.markdown(f'<div class="big-badge">\U0001f525 {urgent} chapitre(s) \u00e0 r\u00e9viser aujourd\'hui !</div>', unsafe_allow_html=True)
 
     # Actions urgentes
     if urgent > 0:
@@ -814,6 +957,41 @@ if st.session_state.page == "dashboard":
                 revision_service.valider_chapitres_urgents(db)
                 db.close()
                 st.success(f"{urgent} chapitres validés !")
+                st.rerun()
+
+    st.markdown("---")
+
+    # Pomodoro Timer
+    with st.expander("\u23f1\ufe0f Pomodoro (25 min travail / 5 min pause)"):
+        if "pomodoro_start" not in st.session_state:
+            st.session_state.pomodoro_start = None
+            st.session_state.pomodoro_mode = "work"
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            if st.button("\u25b6\ufe0f D\u00e9marrer 25 min", use_container_width=True):
+                st.session_state.pomodoro_start = datetime.now()
+                st.session_state.pomodoro_mode = "work"
+                st.rerun()
+        with col_p2:
+            if st.button("\u23f8\ufe0f Arr\u00eater", use_container_width=True):
+                st.session_state.pomodoro_start = None
+                st.rerun()
+        if st.session_state.pomodoro_start:
+            elapsed = (datetime.now() - st.session_state.pomodoro_start).total_seconds()
+            total = 25*60 if st.session_state.pomodoro_mode == "work" else 5*60
+            remaining = max(0, total - int(elapsed))
+            mins, secs = divmod(remaining, 60)
+            pct = min(1.0, elapsed / total)
+            st.progress(pct)
+            mode_label = "\U0001f4aa Travail" if st.session_state.pomodoro_mode == "work" else "\u2615 Pause"
+            st.markdown(f"### {mode_label} — {mins:02d}:{secs:02d}")
+            if remaining == 0:
+                st.balloons()
+                if st.session_state.pomodoro_mode == "work":
+                    st.session_state.pomodoro_start = datetime.now()
+                    st.session_state.pomodoro_mode = "break"
+                else:
+                    st.session_state.pomodoro_start = None
                 st.rerun()
 
     st.markdown("---")
@@ -1119,6 +1297,8 @@ elif st.session_state.page == "stats":
     total = len(chapitres_all)
     urgent = sum(1 for c in chapitres_all if cfg.diff_jours(c.date_prochaine) <= 0)
     maitrise = sum(1 for c in chapitres_all if c.niveau_actuel >= len(cfg.INTERVALLES_J) - 1)
+    nb_matieres = db.query(models.Matiere).count()
+    pct_maitrise = int(maitrise / total * 100) if total > 0 else 0
 
     from models import Activite
     act_items = sorted(
@@ -1209,6 +1389,56 @@ elif st.session_state.page == "stats":
     df_heat = pd.DataFrame(heat_data)
     st.bar_chart(df_heat.set_index("date"), use_container_width=True)
 
+    # Graphique de progression (niveau moyen sur 30 jours)
+    st.markdown("---")
+    st.subheader("\U0001f4c8 Progression du niveau moyen")
+    progression_data = []
+    niv_cumul = 0
+    count_cumul = 0
+    for i in range(30):
+        d = (auj - timedelta(days=29 - i))
+        ds = d.strftime("%Y-%m-%d")
+        rev_du_jour = next((a[1] for a in act_items if a[0] == ds), 0)
+        if rev_du_jour > 0:
+            niv_cumul += rev_du_jour
+            count_cumul += 1
+        progression_data.append({"date": d.strftime("%d/%m"), "niveau_moyen_cumul": niv_cumul / max(count_cumul, 1)})
+    df_prog = pd.DataFrame(progression_data)
+    st.line_chart(df_prog.set_index("date"), use_container_width=True)
+
+    # Pr\u00e9diction de note IA
+    st.markdown("---")
+    st.subheader("\U0001f4c8 Pr\u00e9diction de note")
+    ia = get_ia()
+    if ia and maitrise > 0:
+        if st.button("\U0001f9e0 Estimer ma note probable"):
+            with st.spinner("\U0001f9e0 DeepSeek analyse..."):
+                recap = f"Mati\u00e8res : {nb_matieres}, Chapitres : {total}, Ma\u00eetris\u00e9s : {maitrise} ({pct_maitrise}%), "
+                recap += f"Quiz r\u00e9ussis : {taux_quiz}%, Streak : {streak} jours, "
+                recap += f"Niveau moyen : {sum(c.niveau_actuel for c in chapitres_all)/max(total,1):.1f}/{len(cfg.INTERVALLES_J)-1}"
+                try:
+                    resp = ia._client().chat.completions.create(
+                        model=cfg.DEEPSEEK_MODEL,
+                        messages=[{"role":"system","content":"Expert en p\u00e9dagogie. Estime une note sur 20. R\u00e9ponds en 2 phrases max. Fran\u00e7ais."},
+                                  {"role":"user","content":f"Statistiques d'un \u00e9tudiant : {recap}. Estime sa note probable sur 20."}],
+                    )
+                    st.info(resp.choices[0].message.content)
+                except Exception as e:
+                    st.error(f"Erreur IA : {e}")
+    else:
+        st.caption("N\u00e9cessite la cl\u00e9 API DeepSeek et des chapitres ma\u00eetris\u00e9s.")
+
+    # Export Anki CSV
+    st.markdown("---")
+    st.subheader("\U0001f4cb Export Anki (CSV)")
+    anki_data = []
+    for c in chapitres_all:
+        anki_data.append({"Front": c.nom, "Back": f"Niveau {c.niveau_actuel}/{len(cfg.INTERVALLES_J)-1} - Prochaine r\u00e9vision : {c.date_prochaine}"})
+    df_anki = pd.DataFrame(anki_data)
+    csv_anki = df_anki.to_csv(index=False)
+    st.download_button("\U0001f4e5 T\u00e9l\u00e9charger pour Anki", csv_anki, "studytracker_anki.csv", "text/csv", use_container_width=True)
+    st.caption("Importe ce CSV dans Anki : Fichier > Importer > Format CSV")
+
 
 # ══════════════════════════════════════════════════════════
 # PAGE : CALENDRIER
@@ -1270,6 +1500,101 @@ elif st.session_state.page == "calendar":
                                 naviguer("matiere", mat.id, mat.nom)
                             else:
                                 db3.close()
+
+# ══════════════════════════════════════════════════════════
+# PAGE : EXAMEN BLANC
+# ══════════════════════════════════════════════════════════
+
+elif st.session_state.page == "examen":
+    st.title("\U0001f393 Examen blanc")
+    st.caption("L'IA pioche dans tes cours et crée une épreuve sur mesure.")
+
+    ia = get_ia()
+    if not ia:
+        st.warning("\u26a0\ufe0f Configure ta cl\u00e9 API DeepSeek dans les \u2699\ufe0f Param\u00e8tres pour utiliser l'examen blanc.")
+    else:
+        # R\u00e9cup\u00e9rer les chapitres avec texte cache (PDF analys\u00e9s)
+        db = get_db()
+        chaps_avec_texte = [
+            (c, c.matiere.nom) for c in db.query(models.Chapitre).all()
+            if c.texte_cache and c.texte_cache.strip()
+        ]
+        db.close()
+
+        if len(chaps_avec_texte) < 2:
+            st.info("\U0001f4c4 Il faut au moins 2 chapitres avec des PDF analys\u00e9s pour g\u00e9n\u00e9rer un examen.\n\n"
+                    "Ajoute des PDF \u00e0 tes chapitres, puis clique \u00ab \u2728 Analyser \u00bb avant de g\u00e9n\u00e9rer la fiche.")
+        else:
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                nb_questions = st.slider("Nombre de questions", 3, 15, 8)
+            with col2:
+                if st.button("\U0001f52c G\u00e9n\u00e9rer l'examen", use_container_width=True, type="primary"):
+                    st.session_state.exam_generated = False
+                    with st.spinner(f"\U0001f9e0 DeepSeek cr\u00e9e un examen de {nb_questions} questions..."):
+                        import random
+                        # Piocher des chapitres al\u00e9atoires
+                        selection = random.sample(chaps_avec_texte, min(len(chaps_avec_texte), max(3, nb_questions // 2)))
+                        # Concat\u00e9ner le texte des chapitres s\u00e9lectionn\u00e9s
+                        contexte_exam = ""
+                        matieres_exam = set()
+                        for c, mat_nom in selection:
+                            contexte_exam += f"\n\n=== {c.nom} ({mat_nom}) ===\n{c.texte_cache[:4000]}"
+                            matieres_exam.add(mat_nom)
+
+                        try:
+                            questions = ia.generer_questions(
+                                f"Examen - {', '.join(matieres_exam)}",
+                                "Examen blanc",
+                                contexte_exam,
+                                nb=nb_questions,
+                            )
+                            st.session_state.exam_questions = questions
+                            st.session_state.exam_generated = True
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+            # Afficher l'examen
+            if st.session_state.get("exam_generated") and st.session_state.get("exam_questions"):
+                st.markdown("---")
+                st.subheader("\U0001f4dd \u00c9preuve")
+                questions = st.session_state.exam_questions
+
+                reponses = []
+                for i, q in enumerate(questions):
+                    rep = st.text_area(f"**Q{i+1}.** {q}", key=f"exam_q_{i}", height=80,
+                                       placeholder="Ta r\u00e9ponse...")
+                    reponses.append(rep)
+
+                if st.button("\U0001f4ca Corriger l'examen", use_container_width=True, type="primary"):
+                    with st.spinner("\U0001f9e0 DeepSeek \u00e9value tes r\u00e9ponses..."):
+                        try:
+                            eval_result = ia.evaluer_reponses(
+                                "Examen blanc", "Toutes mati\u00e8res",
+                                questions, reponses, contexte_exam,
+                            )
+                            score = eval_result.get("score_num", 0)
+                            verdict = eval_result.get("verdict", "?")
+
+                            st.markdown("---")
+                            st.markdown(f"## \U0001f3af R\u00e9sultat : {int(score * 100)}%")
+                            if verdict == "r\u00e9ussi":
+                                st.success(f"\u2705 **{verdict.upper()}** — Bravo !")
+                            else:
+                                st.warning(f"\U0001f4da **{verdict.upper()}** — Continue \u00e0 r\u00e9viser.")
+
+                            st.markdown(eval_result.get("message", ""))
+                            st.markdown("### D\u00e9tail par question :")
+                            for j, r in enumerate(eval_result.get("resultats", [])):
+                                emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
+                                st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
+
+                            st.balloons() if score >= 0.7 else None
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+            elif st.session_state.get("exam_generated"):
+                st.success(f"\u2705 {len(st.session_state.exam_questions)} questions g\u00e9n\u00e9r\u00e9es ! R\u00e9ponds ci-dessus.")
+
 
 st.markdown("---")
 st.caption("StudyTracker V2 — App de révision espacée  ·  Propulsé par Streamlit")
