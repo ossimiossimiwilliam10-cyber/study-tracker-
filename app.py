@@ -1003,7 +1003,6 @@ if st.session_state.page == "dashboard":
     db = get_db()
     urgents_chaps = [(c, c.matiere) for c in db.query(models.Chapitre).all() if cfg.diff_jours(c.date_prochaine) <= 0]
     urgents_chaps.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
-    db.close()
 
     if not urgents_chaps:
         st.success("🎉 Tout est à jour ! Aucune révision en retard.")
@@ -1023,12 +1022,12 @@ if st.session_state.page == "dashboard":
                                 unsafe_allow_html=True)
                 with col3:
                     if st.button("✅", key=f"val_{chap.uid}", help="Valider ce chapitre"):
-                        db = get_db()
                         c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
                         if c:
                             revision_service.valider_chapitre(db, c)
-                        db.close()
                         st.rerun()
+
+    db.close()
 
     st.markdown("---")
 
@@ -1544,6 +1543,8 @@ elif st.session_state.page == "examen":
                             contexte_exam += f"\n\n=== {c.nom} ({mat_nom}) ===\n{c.texte_cache[:4000]}"
                             matieres_exam.add(mat_nom)
 
+                        st.session_state.exam_contexte = contexte_exam
+
                         try:
                             questions = ia.generer_questions(
                                 f"Examen - {', '.join(matieres_exam)}",
@@ -1573,7 +1574,8 @@ elif st.session_state.page == "examen":
                         try:
                             eval_result = ia.evaluer_reponses(
                                 "Examen blanc", "Toutes mati\u00e8res",
-                                questions, reponses, contexte_exam,
+                                questions, reponses,
+                                st.session_state.get("exam_contexte", ""),
                             )
                             score = eval_result.get("score_num", 0)
                             verdict = eval_result.get("verdict", "?")
