@@ -75,6 +75,81 @@ def get_db():
 
 init_db()
 
+# ── Import auto du CSV si BDD vide ──
+def _importer_csv_si_vide():
+    """Importe le CSV de l'ancienne app si la BDD est vide (premier lancement)."""
+    import csv as _csv
+    db = get_db()
+    nb = db.query(models.Matiere).count()
+    if nb > 0:
+        db.close()
+        return  # Déjà des données, ne rien faire
+
+    csv_path = os.path.join(os.path.dirname(__file__), "Sauvegarde app précédente.csv")
+    if not os.path.exists(csv_path):
+        db.close()
+        return
+
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            ue_nom = row.get("UE", "").strip()
+            mat_nom = row.get("Matière", "").strip()
+            chap_nom = row.get("Chapitre", "").strip()
+            niveau = int(row.get("Niveau", "0") or "0")
+            prochain = row.get("Prochain", "").strip() or cfg.date_aujourdhui()
+            mega = row.get("Méga chapitre", "").strip() or None
+            notes = row.get("Notes", "").strip() or ""
+            video = row.get("Vidéo", "").strip() or None
+
+            if not mat_nom or not chap_nom:
+                continue
+
+            # UE
+            if ue_nom:
+                ue = db.query(models.UE).filter(models.UE.nom == ue_nom).first()
+                if not ue:
+                    ue = models.UE(nom=ue_nom)
+                    db.add(ue)
+                    db.flush()
+            else:
+                ue = None
+
+            # Matière
+            matiere = db.query(models.Matiere).filter(models.Matiere.nom == mat_nom).first()
+            if not matiere:
+                matiere = models.Matiere(nom=mat_nom)
+                db.add(matiere)
+                db.flush()
+            if ue and ue not in matiere.ues:
+                matiere.ues.append(ue)
+                db.flush()
+
+            # Chapitre (skip si existe déjà)
+            existant = db.query(models.Chapitre).filter(
+                models.Chapitre.matiere_id == matiere.id,
+                models.Chapitre.nom == chap_nom,
+            ).first()
+            if existant:
+                continue
+
+            max_ordre = db.query(models.Chapitre.ordre).filter(
+                models.Chapitre.matiere_id == matiere.id
+            ).order_by(models.Chapitre.ordre.desc()).first()
+            ordre = (max_ordre[0] + 1) if max_ordre and max_ordre[0] is not None else 0
+
+            chap = models.Chapitre(
+                matiere_id=matiere.id, nom=chap_nom, ordre=ordre,
+                niveau_actuel=niveau, date_prochaine=prochain,
+                mega_chapitre=mega, notes=notes, video_youtube=video,
+                fichiers_attaches=[],
+            )
+            db.add(chap)
+    db.commit()
+    db.close()
+
+_importer_csv_si_vide()
+
 # ── IA (DeepSeek) ──
 def get_ia() -> ServiceIA | None:
     """Retourne l'instance IA configurée avec la clé API stockée en session."""
