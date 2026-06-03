@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from database import engine, SessionLocal, Base
 import models
 from services import crud_service, revision_service
+from services.ia_service import ServiceIA
 import config as cfg
 
 # ══════════════════════════════════════════════════════════
@@ -73,6 +74,22 @@ def get_db():
 
 
 init_db()
+
+# ── IA (DeepSeek) ──
+def get_ia() -> ServiceIA | None:
+    """Retourne l'instance IA configurée avec la clé API stockée en session."""
+    if "ia_service" not in st.session_state:
+        st.session_state.ia_service = ServiceIA()
+    # Mettre à jour la clé depuis les paramètres stockés
+    db = get_db()
+    param = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+    db.close()
+    if param and param.valeur:
+        st.session_state.ia_service.cle_api = param.valeur
+    if st.session_state.ia_service.disponible:
+        return st.session_state.ia_service
+    return None
+
 
 # ══════════════════════════════════════════════════════════
 # ÉTAT DE SESSION
@@ -173,6 +190,176 @@ def _render_chapitre(chap, matiere_id):
                     revision_service.valider_chapitre(db, c)
                 db.close()
                 st.rerun()
+
+        # ── Fichiers attachés ──
+        fichiers = chap.fichiers_attaches or []
+        if fichiers:
+            st.caption(f"\U0001f4ce {len(fichiers)} fichier(s) attach\u00e9(s)")
+            for i, f in enumerate(fichiers):
+                col_f1, col_f2 = st.columns([8, 1])
+                with col_f1:
+                    st.caption(f"  \U0001f4c4 {f.get('nom', 'PDF')}")
+                with col_f2:
+                    if st.button("\u274c", key=f"del_file_{chap.uid}_{i}", help="Retirer ce fichier"):
+                        db = get_db()
+                        crud_service.retirer_fichier(db, matiere_id, chap.uid, i)
+                        db.close()
+                        st.rerun()
+
+        # ── Upload PDF ──
+        uploaded = st.file_uploader("Ajouter un PDF", type=["pdf"], key=f"pdf_{chap.uid}",
+                                     label_visibility="collapsed")
+        if uploaded:
+            # Sauvegarder le fichier
+            import time
+            nom_fichier = f"{int(time.time())}_{uploaded.name}"
+            chemin = os.path.join(cfg.DOSSIER_FICHIERS, nom_fichier)
+            with open(chemin, "wb") as f_out:
+                f_out.write(uploaded.getbuffer())
+            db = get_db()
+            crud_service.ajouter_fichier(db, matiere_id, chap.uid, uploaded.name, chemin)
+            db.close()
+            st.success(f"\U0001f4c4 {uploaded.name} attach\u00e9 !")
+            st.rerun()
+
+        # ── IA : Générer / Voir ──
+        ia = get_ia()
+        if ia and fichiers:
+            # Extraire le texte des PDFs (cache)
+            texte_concat = chap.texte_cache
+            if not texte_concat:
+                if st.button("\u2728 G\u00e9n\u00e9rer la fiche IA", key=f"gen_fiche_{chap.uid}"):
+                    with st.spinner("\u2728 Analyse des PDFs..."):
+                        all_text = ""
+                        for f in fichiers:
+                            chemin_f = f.get("chemin", "")
+                            if chemin_f and os.path.exists(chemin_f):
+                                texte, methode = ia.extraire_texte_pdf(chemin_f)
+                                all_text += texte + "\n\n"
+                        if all_text.strip():
+                            texte_concat = all_text
+                            db = get_db()
+                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                            if c:
+                                c.texte_cache = texte_concat
+                                db.commit()
+                            db.close()
+                            st.success("PDF analys\u00e9s ! Reclique pour g\u00e9n\u00e9rer la fiche.")
+                            st.rerun()
+                        else:
+                            st.error("Impossible d'extraire le texte des PDFs.")
+
+            if texte_concat and not chap.fiche_ia:
+                if st.button("\U0001f9e0 Cr\u00e9er la fiche de r\u00e9vision", key=f"create_fiche_{chap.uid}"):
+                    with st.spinner("\U0001f9e0 DeepSeek g\u00e9n\u00e8re la fiche..."):
+                        try:
+                            fiche = ia.generer_fiche(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat)
+                            db = get_db()
+                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                            if c:
+                                c.fiche_ia = fiche
+                                db.commit()
+                            db.close()
+                            st.success("Fiche g\u00e9n\u00e9r\u00e9e !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+            if texte_concat and not chap.quiz_cache:
+                if st.button("\U0001f3af G\u00e9n\u00e9rer un quiz", key=f"gen_quiz_{chap.uid}"):
+                    with st.spinner("\U0001f3af DeepSeek cr\u00e9e le quiz..."):
+                        try:
+                            questions = ia.generer_questions(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat, nb=5)
+                            db = get_db()
+                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                            if c:
+                                c.quiz_cache = questions
+                                db.commit()
+                            db.close()
+                            st.success(f"{len(questions)} questions g\u00e9n\u00e9r\u00e9es !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+            if texte_concat and not chap.qcm_cache:
+                if st.button("\U0001f4cb G\u00e9n\u00e9rer un QCM", key=f"gen_qcm_{chap.uid}"):
+                    with st.spinner("\U0001f4cb DeepSeek cr\u00e9e le QCM..."):
+                        try:
+                            qcm = ia.generer_qcm(chap.nom, chap.matiere.nom if chap.matiere else "?", texte_concat, nb=5)
+                            db = get_db()
+                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                            if c:
+                                c.qcm_cache = qcm
+                                db.commit()
+                            db.close()
+                            st.success("QCM g\u00e9n\u00e9r\u00e9 !")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+        # ── Afficher fiche IA ──
+        if chap.fiche_ia:
+            with st.expander("\U0001f9e0 Voir la fiche de r\u00e9vision"):
+                st.markdown(chap.fiche_ia)
+
+        # ── Quiz interactif ──
+        if chap.quiz_cache:
+            with st.expander(f"\U0001f3af Quiz ({len(chap.quiz_cache)} questions)"):
+                reponses = []
+                for i, q in enumerate(chap.quiz_cache):
+                    rep = st.text_area(f"Q{i+1}. {q}", key=f"quiz_{chap.uid}_{i}", height=68,
+                                       placeholder="Ta r\u00e9ponse...")
+                    reponses.append(rep)
+                if st.button("\U0001f4dd \u00c9valuer mes r\u00e9ponses", key=f"eval_quiz_{chap.uid}"):
+                    texte_concat = chap.texte_cache or ""
+                    with st.spinner("\U0001f9e0 \u00c9valuation par DeepSeek..."):
+                        try:
+                            eval_result = ia.evaluer_reponses(chap.nom, chap.matiere.nom if chap.matiere else "?",
+                                                              chap.quiz_cache, reponses, texte_concat)
+                            score = eval_result.get("score_num", 0)
+                            reussi = eval_result.get("verdict") == "r\u00e9ussi"
+                            db = get_db()
+                            c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                            if c:
+                                revision_service.callback_quiz(db, c, score, reussi, "ouvert")
+                            db.close()
+                            st.markdown(f"### Verdict : {'\u2705 R\u00e9ussi' if reussi else '\U0001f4da \u00c0 retravailler'}")
+                            st.markdown(f"**Score :** {int(score * 100)}%")
+                            st.markdown(eval_result.get("message", ""))
+                            for j, r in enumerate(eval_result.get("resultats", [])):
+                                emoji = {"correct": "\u2705", "partiel": "\u26a0\ufe0f", "incorrect": "\u274c"}.get(r.get("score"), "")
+                                st.markdown(f"{emoji} **Q{j+1}** : {r.get('feedback', '')}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur IA : {e}")
+
+        # ── QCM interactif ──
+        if chap.qcm_cache:
+            with st.expander(f"\U0001f4cb QCM ({len(chap.qcm_cache)} questions)"):
+                reponses_qcm = {}
+                for i, q_data in enumerate(chap.qcm_cache):
+                    choix = st.radio(f"**Q{i+1}.** {q_data['question']}",
+                                     q_data["options"], key=f"qcm_{chap.uid}_{i}", index=None)
+                    reponses_qcm[i] = choix
+                if st.button("\U0001f4dd Valider le QCM", key=f"eval_qcm_{chap.uid}"):
+                    corrects = 0
+                    for i, q_data in enumerate(chap.qcm_cache):
+                        if reponses_qcm.get(i) == q_data["correct"]:
+                            corrects += 1
+                    score = corrects / len(chap.qcm_cache)
+                    reussi = score >= 0.7
+                    db = get_db()
+                    c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
+                    if c:
+                        revision_service.callback_quiz(db, c, score, reussi, "qcm")
+                    db.close()
+                    st.markdown(f"### Score : {corrects}/{len(chap.qcm_cache)} ({int(score * 100)}%) — {'\u2705 R\u00e9ussi' if reussi else '\U0001f4da \u00c0 retravailler'}")
+                    for i, q_data in enumerate(chap.qcm_cache):
+                        user = reponses_qcm.get(i)
+                        correct = q_data["correct"]
+                        emoji = "\u2705" if user == correct else "\u274c"
+                        st.markdown(f"{emoji} **Q{i+1}** : {correct} — {q_data.get('explication', '')}")
+                    st.rerun()
 
         with st.expander("\u2699\ufe0f Actions"):
             ac1, ac2, ac3, ac4, ac5, ac6, ac7, ac8 = st.columns(8)
@@ -353,17 +540,65 @@ with st.sidebar:
     # Actions rapides
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("⚙️ Thème", use_container_width=True):
-            st.info("Le thème dark est appliqué. Configure dans Streamlit Cloud.")
+        if st.button("\u2699\ufe0f Param\u00e8tres", use_container_width=True):
+            st.session_state.show_settings = True
     with col2:
-        if st.button("↩️ Undo", use_container_width=True):
+        if st.button("\u21a9\ufe0f Undo", use_container_width=True):
             try:
-                db = get_db()
-                # Simple undo via service
-                db.close()
+                db2 = get_db()
+                db2.close()
                 naviguer(st.session_state.page, st.session_state.matiere_id, st.session_state.matiere_nom)
             except Exception:
-                st.warning("Rien à annuler")
+                st.warning("Rien \u00e0 annuler")
+
+
+# ══════════════════════════════════════════════════════════
+# MODAL : Paramètres (clé API DeepSeek)
+# ══════════════════════════════════════════════════════════
+
+if st.session_state.get("show_settings"):
+    with st.expander("\u2699\ufe0f Param\u00e8tres", expanded=True):
+        db = get_db()
+        param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+        db.close()
+        cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
+        ia = get_ia()
+
+        st.markdown("### \U0001f9e0 Intelligence Artificielle (DeepSeek)")
+        if ia:
+            st.success("\u2705 IA connect\u00e9e et pr\u00eate !")
+            st.caption("Fiches de r\u00e9vision, quiz et QCM disponibles pour les chapitres avec PDF.")
+        else:
+            st.warning("\u26a0\ufe0f Cl\u00e9 API DeepSeek non configur\u00e9e.")
+
+        st.markdown("**Cl\u00e9 API DeepSeek**")
+        st.caption("Cr\u00e9e ta cl\u00e9 sur [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)")
+
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            new_key = st.text_input("Cl\u00e9 API", value=cle_actuelle, type="password",
+                                    placeholder="sk-...", key="settings_api_key",
+                                    label_visibility="collapsed")
+        with col_b:
+            if st.button("\U0001f4be Sauvegarder", use_container_width=True):
+                db = get_db()
+                p = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+                if not p:
+                    p = models.Parametre(cle="deepseek_api_key", valeur=new_key.strip())
+                    db.add(p)
+                else:
+                    p.valeur = new_key.strip()
+                db.commit()
+                db.close()
+                # Reset le service IA
+                if "ia_service" in st.session_state:
+                    st.session_state.ia_service.cle_api = new_key.strip()
+                st.success("Cl\u00e9 API sauvegard\u00e9e !")
+                st.rerun()
+
+        if st.button("Fermer", use_container_width=True):
+            st.session_state.show_settings = False
+            st.rerun()
 
 
 # ══════════════════════════════════════════════════════════

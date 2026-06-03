@@ -42,6 +42,47 @@ LEVEL_COLORS: list[str] = [
 os.makedirs(DOSSIER_DATA, exist_ok=True)
 os.makedirs(DOSSIER_BACKUPS, exist_ok=True)
 
+# ── IA (DeepSeek) ──
+try:
+    from openai import OpenAI  # noqa: F401
+    HAS_AI = True
+except ImportError:
+    HAS_AI = False
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_MODEL = "deepseek-chat"
+TIMEOUT_IA_SECONDES = 120
+
+# ── OCR / PDF ──
+HAS_FITZ = None
+HAS_TESSERACT = None
+
+def _check_fitz():
+    global HAS_FITZ
+    if HAS_FITZ is None:
+        try:
+            import fitz as _f  # noqa: F401
+            HAS_FITZ = True
+        except ImportError:
+            HAS_FITZ = False
+    return HAS_FITZ
+
+def _check_tesseract():
+    global HAS_TESSERACT
+    if HAS_TESSERACT is None:
+        try:
+            import pytesseract as _p  # noqa: F401
+            from PIL import Image as _img  # noqa: F401
+            HAS_TESSERACT = True
+        except ImportError:
+            HAS_TESSERACT = False
+    return HAS_TESSERACT
+
+MIN_CHARS_PER_PAGE = 50
+MAX_OCR_PAGES = 50
+DOSSIER_FICHIERS = os.path.join(DOSSIER_DATA, "fichiers")
+os.makedirs(DOSSIER_FICHIERS, exist_ok=True)
+
 
 # ══════════════════════════════════════════════════════════
 # FONCTIONS UTILITAIRES (stdlib uniquement)

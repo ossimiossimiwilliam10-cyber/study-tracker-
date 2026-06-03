@@ -87,7 +87,7 @@ class Chapitre(Base):
     date_prochaine = Column(String(10), default=datetime.now().strftime("%Y-%m-%d"))
 
     # Fichiers & liens
-    fichier_attache = Column(String(500), nullable=True)
+    fichiers_attaches = Column(JSON, default=list)  # [{"nom": "...", "chemin": "..."}, ...]
     video_youtube = Column(String(500), nullable=True)
 
     # Regroupement
@@ -116,7 +116,7 @@ class Chapitre(Base):
             "nom": self.nom,
             "niveau_actuel": self.niveau_actuel,
             "date_prochaine": self.date_prochaine,
-            "fichier_attache": self.fichier_attache,
+            "fichiers_attaches": self.fichiers_attaches or [],
             "mega_chapitre": self.mega_chapitre,
             "historique_quiz": [h.to_dict() for h in self.historique_quiz],
             "quiz_cache": self.quiz_cache,

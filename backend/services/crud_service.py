@@ -1,5 +1,6 @@
 """Service CRUD — matières, UEs, chapitres."""
 
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -178,7 +179,7 @@ def creer_chapitre(
     matiere_id: int,
     nom: str,
     mega_chapitre: Optional[str] = None,
-    fichier_attache: Optional[str] = None,
+    fichiers: Optional[list] = None,
     video_youtube: Optional[str] = None,
     notes: str = "",
 ) -> Chapitre:
@@ -205,7 +206,7 @@ def creer_chapitre(
         niveau_actuel=0,
         date_prochaine=datetime.now().strftime("%Y-%m-%d"),
         mega_chapitre=mega_chapitre,
-        fichier_attache=fichier_attache,
+        fichiers_attaches=fichiers or [],
         video_youtube=video_youtube,
         notes=notes,
     )
@@ -288,7 +289,7 @@ def dupliquer_chapitre(db: Session, matiere_id: int, chap_uid: str) -> Chapitre:
         niveau_actuel=0,
         date_prochaine=datetime.now().strftime("%Y-%m-%d"),
         mega_chapitre=chap.mega_chapitre,
-        fichier_attache=chap.fichier_attache,
+        fichiers_attaches=chap.fichiers_attaches or [],
         video_youtube=chap.video_youtube,
         notes=chap.notes,
     )
@@ -351,4 +352,51 @@ def editer_notes(db: Session, matiere_id: int, chap_uid: str, notes: str) -> Cha
     chap.notes = notes
     db.commit()
     db.refresh(chap)
+    return chap
+
+
+# ══════════════════════════════════════════════════════════
+# Fichiers attachés
+# ══════════════════════════════════════════════════════════
+
+def ajouter_fichier(db: Session, matiere_id: int, chap_uid: str, nom: str, chemin: str) -> Chapitre:
+    """Ajoute un fichier PDF aux fichiers attachés du chapitre."""
+    chap = obtenir_chapitre(db, matiere_id, chap_uid)
+    if not chap:
+        raise ValueError("Chapitre introuvable.")
+    fichiers = list(chap.fichiers_attaches or [])
+    fichiers.append({"nom": nom, "chemin": chemin})
+    chap.fichiers_attaches = fichiers
+    # Vider les caches IA pour forcer la regénération
+    chap.fiche_ia = None
+    chap.texte_cache = None
+    chap.quiz_cache = None
+    chap.qcm_cache = None
+    db.commit()
+    db.refresh(chap)
+    return chap
+
+
+def retirer_fichier(db: Session, matiere_id: int, chap_uid: str, index: int) -> Chapitre:
+    """Retire un fichier attaché par son index."""
+    chap = obtenir_chapitre(db, matiere_id, chap_uid)
+    if not chap:
+        raise ValueError("Chapitre introuvable.")
+    fichiers = list(chap.fichiers_attaches or [])
+    if 0 <= index < len(fichiers):
+        # Supprimer le fichier physique
+        chemin = fichiers[index].get("chemin", "")
+        if chemin and os.path.exists(chemin):
+            try:
+                os.remove(chemin)
+            except OSError:
+                pass
+        fichiers.pop(index)
+        chap.fichiers_attaches = fichiers
+        chap.fiche_ia = None
+        chap.texte_cache = None
+        chap.quiz_cache = None
+        chap.qcm_cache = None
+        db.commit()
+        db.refresh(chap)
     return chap
