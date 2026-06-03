@@ -54,8 +54,7 @@ def _set_theme(theme: str):
     db.commit()
     db.close()
 
-if "theme" not in st.session_state:
-    st.session_state.theme = _get_theme()
+# L'initialisation du thème est faite après init_db()
 
 def _theme_css():
     """Génère le CSS selon le thème actuel."""
@@ -85,8 +84,6 @@ def _theme_css():
             section[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e2e8f0; }
             section[data-testid="stSidebar"] * { color: #0f172a !important; }
         </style>"""
-
-st.markdown(_theme_css(), unsafe_allow_html=True)
 
 # ── CSS bonus (badges, animations, mobile) ──
 st.markdown("""
@@ -125,6 +122,11 @@ def get_db():
 
 
 init_db()
+
+# ── Init thème (après init_db pour avoir get_db défini) ──
+if "theme" not in st.session_state:
+    st.session_state.theme = _get_theme()
+st.markdown(_theme_css(), unsafe_allow_html=True)
 
 # ── Import auto du CSV si BDD vide ──
 def _importer_csv_si_vide():
