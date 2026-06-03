@@ -778,49 +778,48 @@ with st.sidebar:
 # MODAL : Paramètres (clé API DeepSeek)
 # ══════════════════════════════════════════════════════════
 
-if st.session_state.get("show_settings"):
-    with st.expander("\u2699\ufe0f Param\u00e8tres", expanded=True):
-        db = get_db()
-        param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
-        db.close()
-        cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
-        ia = get_ia()
+@st.dialog("\u2699\ufe0f Param\u00e8tres", width="large")
+def show_settings_dialog():
+    db = get_db()
+    param_cle = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+    db.close()
+    cle_actuelle = param_cle.valeur if param_cle and param_cle.valeur else ""
+    ia = get_ia()
 
-        st.markdown("### \U0001f9e0 Intelligence Artificielle (DeepSeek)")
-        if ia:
-            st.success("\u2705 IA connect\u00e9e et pr\u00eate !")
-            st.caption("Fiches de r\u00e9vision, quiz et QCM disponibles pour les chapitres avec PDF.")
-        else:
-            st.warning("\u26a0\ufe0f Cl\u00e9 API DeepSeek non configur\u00e9e.")
-
-        st.markdown("**Cl\u00e9 API DeepSeek**")
+    st.markdown("### \U0001f9e0 Intelligence Artificielle (DeepSeek)")
+    if ia:
+        st.success("\u2705 IA connect\u00e9e et pr\u00eate !")
+        st.caption("Fiches de r\u00e9vision, quiz, QCM et flashcards disponibles pour les chapitres avec PDF.")
+    else:
+        st.warning("\u26a0\ufe0f Cl\u00e9 API DeepSeek non configur\u00e9e.")
         st.caption("Cr\u00e9e ta cl\u00e9 sur [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)")
 
-        col_a, col_b = st.columns([3, 1])
-        with col_a:
-            new_key = st.text_input("Cl\u00e9 API", value=cle_actuelle, type="password",
-                                    placeholder="sk-...", key="settings_api_key",
-                                    label_visibility="collapsed")
-        with col_b:
-            if st.button("\U0001f4be Sauvegarder", width='stretch'):
-                db = get_db()
-                p = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
-                if not p:
-                    p = models.Parametre(cle="deepseek_api_key", valeur=new_key.strip())
-                    db.add(p)
-                else:
-                    p.valeur = new_key.strip()
-                db.commit()
-                db.close()
-                # Reset le service IA
-                if "ia_service" in st.session_state:
-                    st.session_state.ia_service.cle_api = new_key.strip()
-                st.success("Cl\u00e9 API sauvegard\u00e9e !")
-                st.rerun()
+    new_key = st.text_input("Cl\u00e9 API DeepSeek", value=cle_actuelle, type="password",
+                            placeholder="sk-...", key="settings_api_key")
 
-        if st.button("Fermer", width='stretch'):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("\U0001f4be Sauvegarder", width='stretch', use_container_width=True):
+            db2 = get_db()
+            p = db2.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
+            if not p:
+                p = models.Parametre(cle="deepseek_api_key", valeur=new_key.strip())
+                db2.add(p)
+            else:
+                p.valeur = new_key.strip()
+            db2.commit()
+            db2.close()
+            if "ia_service" in st.session_state:
+                st.session_state.ia_service.cle_api = new_key.strip()
+            st.success("Cl\u00e9 API sauvegard\u00e9e !")
+            st.rerun()
+    with col2:
+        if st.button("Fermer", width='stretch', use_container_width=True):
             st.session_state.show_settings = False
             st.rerun()
+
+if st.session_state.get("show_settings"):
+    show_settings_dialog()
 
 
 # ══════════════════════════════════════════════════════════
