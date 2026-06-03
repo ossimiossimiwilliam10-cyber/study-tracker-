@@ -18,6 +18,17 @@ class Base(DeclarativeBase):
     __allow_unmapped__ = True
 
 
+def migrate():
+    """Ajoute les colonnes manquantes sans casser l'existant."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE chapitres ADD COLUMN trashed BOOLEAN DEFAULT FALSE"))
+            conn.commit()
+        except Exception:
+            pass  # Colonne existe déjà
+
+
 def get_db():
     """Retourne une session BDD."""
     db = SessionLocal()

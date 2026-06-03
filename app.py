@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 # ── Imports backend ──
-from database import engine, SessionLocal, Base
+from database import engine, SessionLocal, Base, migrate
 import models
 from services import crud_service, revision_service
 from services.ia_service import ServiceIA
@@ -125,6 +125,7 @@ st.markdown("""
 def init_db():
     """Initialise la base de données (une seule fois)."""
     Base.metadata.create_all(bind=engine)
+    migrate()
     with db_session() as db:
         models.Parametre.creer_defauts(db)
 
@@ -700,6 +701,12 @@ with st.sidebar:
     if st.button("\U0001f393 Examen blanc", width='stretch',
                  type="primary" if st.session_state.page == "examen" else "secondary"):
         naviguer("examen")
+    if st.button("\u26a1 R\u00e9vision rapide", width='stretch',
+                 type="primary" if st.session_state.page == "quick" else "secondary"):
+        naviguer("quick")
+    if st.button("\U0001f5d1\ufe0f Corbeille", width='stretch',
+                 type="primary" if st.session_state.page == "trash" else "secondary"):
+        naviguer("trash")
 
     st.markdown("---")
 
@@ -986,17 +993,6 @@ if st.session_state.page == "dashboard":
     badges_html += '</div>'
     if "badge-gold" in badges_html or "badge-silver" in badges_html or "badge-bronze" in badges_html:
         st.markdown(badges_html, unsafe_allow_html=True)
-
-    # Objectif quotidien
-    with db_session() as db_o:
-        obj_param = db_o.query(models.Parametre).filter(models.Parametre.cle == "objectif_quotidien").first()
-        obj_val = int(obj_param.valeur) if obj_param and obj_param.valeur else 5
-    revs_auj = sum(a[1] for a in act_items if a[0] == datetime.now().strftime("%Y-%m-%d"))
-    obj_pct = min(1.0, revs_auj / obj_val) if obj_val > 0 else 0
-    if revs_auj >= obj_val:
-        st.success(f"\U0001f3af Objectif du jour atteint : {revs_auj}/{obj_val} r\u00e9visions ! \U0001f389")
-    else:
-        st.progress(obj_pct, text=f"\U0001f3af Objectif : {revs_auj}/{obj_val} r\u00e9visions aujourd'hui")
 
     # Banni\u00e8re urgente anim\u00e9e
     if urgent > 0:
@@ -1690,6 +1686,101 @@ elif st.session_state.page == "examen":
                         st.rerun()
             elif st.session_state.get("exam_generated"):
                 st.success(f"\u2705 {len(st.session_state.exam_questions)} questions g\u00e9n\u00e9r\u00e9es ! R\u00e9ponds ci-dessus.")
+
+
+# ══════════════════════════════════════════════════════════
+# PAGE : RÉVISION RAPIDE
+# ══════════════════════════════════════════════════════════
+
+elif st.session_state.page == "quick":
+    st.title("\u26a1 R\u00e9vision rapide")
+    st.caption("Parcourt tous tes chapitres urgents en mode swipe. Valide ou passe.")
+
+    with db_session() as db:
+        urgents = [(c, c.matiere.nom, c.matiere_id) for c in db.query(models.Chapitre).all()
+                   if cfg.diff_jours(c.date_prochaine) <= 0 and not c.trashed]
+    urgents.sort(key=lambda x: cfg.diff_jours(x[0].date_prochaine))
+
+    if not urgents:
+        st.success("\U0001f389 Aucun chapitre \u00e0 r\u00e9viser ! Tout est \u00e0 jour.")
+    else:
+        if "quick_idx" not in st.session_state:
+            st.session_state.quick_idx = 0
+        idx = st.session_state.quick_idx
+
+        if idx >= len(urgents):
+            st.balloons()
+            st.success(f"\U0001f389 Session termin\u00e9e ! {len(urgents)} chapitres parcourus.")
+            if st.button("\U0001f504 Recommencer"):
+                st.session_state.quick_idx = 0
+                st.rerun()
+        else:
+            chap, mat_nom, mat_id = urgents[idx]
+            retard = cfg.diff_jours(chap.date_prochaine)
+            badge_text, _ = status_badge(retard, chap.date_prochaine)
+
+            # Progression
+            st.progress((idx) / len(urgents), text=f"Chapitre {idx+1}/{len(urgents)}")
+
+            with st.container(border=True):
+                st.markdown(f"## {chap.nom}")
+                st.caption(f"\U0001f4d6 {mat_nom}  \u00b7  Niveau {chap.niveau_actuel}  \u00b7  {badge_text}")
+                render_progress(chap.niveau_actuel)
+
+                if chap.notes:
+                    st.info(chap.notes)
+                if chap.fiche_ia:
+                    with st.expander("\U0001f9e0 Voir la fiche"):
+                        st.markdown(chap.fiche_ia)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("\u2705 Je connais \u2014 Valider", width='stretch', key=f"quick_ok_{chap.uid}"):
+                        with db_session() as db2:
+                            c = crud_service.obtenir_chapitre(db2, mat_id, chap.uid)
+                            if c:
+                                revision_service.valider_chapitre(db2, c)
+                        st.session_state.quick_idx += 1
+                        st.rerun()
+                with col2:
+                    if st.button("\u23ed\ufe0f Pas maintenant \u2014 Passer", width='stretch', key=f"quick_skip_{chap.uid}"):
+                        st.session_state.quick_idx += 1
+                        st.rerun()
+
+
+# ══════════════════════════════════════════════════════════
+# PAGE : CORBEILLE
+# ══════════════════════════════════════════════════════════
+
+elif st.session_state.page == "trash":
+    st.title("\U0001f5d1\ufe0f Corbeille")
+    st.caption("Chapitres supprim\u00e9s. Tu peux les restaurer ou les supprimer d\u00e9finitivement.")
+
+    with db_session() as db:
+        trashed = crud_service.get_trashed(db)
+
+    if not trashed:
+        st.info("La corbeille est vide.")
+    else:
+        for chap in trashed:
+            matiere_nom = chap.matiere.nom if chap.matiere else "?"
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([4, 1, 1])
+                with col1:
+                    st.markdown(f"**{chap.nom}**")
+                    st.caption(f"\U0001f4d6 {matiere_nom} \u00b7 Niveau {chap.niveau_actuel}")
+                with col2:
+                    if st.button("\u21a9\ufe0f Restaurer", key=f"restore_{chap.uid}"):
+                        with db_session() as db2:
+                            crud_service.restaurer_chapitre(db2, chap.matiere_id, chap.uid)
+                        st.success(f"\u00ab {chap.nom} \u00bb restaur\u00e9 !")
+                        st.rerun()
+                with col3:
+                    if st.button("\u2620\ufe0f D\u00e9finitif", key=f"permadel_{chap.uid}"):
+                        with db_session() as db2:
+                            crud_service.supprimer_definitivement(db2, chap.matiere_id, chap.uid)
+                        st.success("Supprim\u00e9 d\u00e9finitivement.")
+                        st.rerun()
 
 
 st.markdown("---")

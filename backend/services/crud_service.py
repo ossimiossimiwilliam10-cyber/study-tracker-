@@ -142,7 +142,7 @@ def lister_chapitres(
     """Liste les chapitres d'une matière avec tri et filtres."""
     chapitres = (
         db.query(Chapitre)
-        .filter(Chapitre.matiere_id == matiere_id)
+        .filter(Chapitre.matiere_id == matiere_id, Chapitre.trashed == False)
         .order_by(Chapitre.ordre, Chapitre.nom)
         .all()
     )
@@ -256,12 +256,38 @@ def renommer_chapitre(db: Session, matiere_id: int, chap_uid: str, nouveau_nom: 
 
 
 def supprimer_chapitre(db: Session, matiere_id: int, chap_uid: str) -> bool:
+    """Soft delete : met à la corbeille."""
     chap = obtenir_chapitre(db, matiere_id, chap_uid)
+    if not chap:
+        return False
+    chap.trashed = True
+    db.commit()
+    return True
+
+
+def restaurer_chapitre(db: Session, matiere_id: int, chap_uid: str) -> bool:
+    """Restaure depuis la corbeille."""
+    chap = db.query(Chapitre).filter(Chapitre.matiere_id == matiere_id, Chapitre.uid == chap_uid).first()
+    if not chap:
+        return False
+    chap.trashed = False
+    db.commit()
+    return True
+
+
+def supprimer_definitivement(db: Session, matiere_id: int, chap_uid: str) -> bool:
+    """Suppression définitive."""
+    chap = db.query(Chapitre).filter(Chapitre.matiere_id == matiere_id, Chapitre.uid == chap_uid).first()
     if not chap:
         return False
     db.delete(chap)
     db.commit()
     return True
+
+
+def get_trashed(db: Session) -> list[Chapitre]:
+    """Liste les chapitres dans la corbeille."""
+    return db.query(Chapitre).filter(Chapitre.trashed == True).order_by(Chapitre.nom).all()
 
 
 def deplacer_chapitre(db: Session, matiere_id: int, chap_uid: str, matiere_dst_id: int) -> Chapitre:

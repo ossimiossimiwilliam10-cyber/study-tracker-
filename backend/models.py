@@ -81,6 +81,7 @@ class Chapitre(Base):
     matiere_id = Column(Integer, ForeignKey("matieres.id", ondelete="CASCADE"), nullable=False, index=True)
     nom = Column(String(200), nullable=False)
     ordre = Column(Integer, default=0)
+    trashed = Column(Boolean, default=False)  # Corbeille
 
     # Répétition espacée
     niveau_actuel = Column(Integer, default=0)
