@@ -311,7 +311,7 @@ def _render_chapitre(chap, matiere_id):
                         unsafe_allow_html=True)
 
         with col3:
-            if st.button("\u2705 Valider", key=f"val_{chap.uid}", use_container_width=True):
+            if st.button("\u2705 Valider", key=f"val_{chap.uid}", width='stretch'):
                 db = get_db()
                 c = crud_service.obtenir_chapitre(db, matiere_id, chap.uid)
                 if c:
@@ -663,16 +663,16 @@ with st.sidebar:
 
     # Navigation
     st.markdown("---")
-    if st.button("🏠 Accueil", use_container_width=True,
+    if st.button("🏠 Accueil", width='stretch',
                  type="primary" if st.session_state.page == "dashboard" else "secondary"):
         naviguer("dashboard")
-    if st.button("📊 Stats", use_container_width=True,
+    if st.button("📊 Stats", width='stretch',
                  type="primary" if st.session_state.page == "stats" else "secondary"):
         naviguer("stats")
-    if st.button("📅 Calendrier", use_container_width=True,
+    if st.button("📅 Calendrier", width='stretch',
                  type="primary" if st.session_state.page == "calendar" else "secondary"):
         naviguer("calendar")
-    if st.button("\U0001f393 Examen blanc", use_container_width=True,
+    if st.button("\U0001f393 Examen blanc", width='stretch',
                  type="primary" if st.session_state.page == "examen" else "secondary"):
         naviguer("examen")
 
@@ -689,10 +689,10 @@ with st.sidebar:
         db.close()
 
         for m in matieres:
-            if st.button(f"📖 {m.nom}", use_container_width=True):
+            if st.button(f"📖 {m.nom}", width='stretch'):
                 naviguer("matiere", m.id, m.nom)
         for c in results[:5]:
-            if st.button(f"📝 {c.nom} ({c.matiere.nom})", use_container_width=True):
+            if st.button(f"📝 {c.nom} ({c.matiere.nom})", width='stretch'):
                 naviguer("matiere", c.matiere_id, c.matiere.nom)
 
     st.markdown("---")
@@ -716,7 +716,7 @@ with st.sidebar:
                 urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
                 col1, col2 = st.columns([5, 1])
                 with col1:
-                    if st.button(f"   📖 {m.nom[:22]}", key=f"side_{m.id}", use_container_width=True,
+                    if st.button(f"   📖 {m.nom[:22]}", key=f"side_{m.id}", width='stretch',
                                  type="primary" if st.session_state.matiere_id == m.id else "secondary"):
                         naviguer("matiere", m.id, m.nom)
                 with col2:
@@ -733,7 +733,7 @@ with st.sidebar:
         urg = sum(1 for c in m.chapitres if cfg.diff_jours(c.date_prochaine) <= 0)
         col1, col2 = st.columns([5, 1])
         with col1:
-            if st.button(f"📖 {m.nom[:25]}", key=f"side_noue_{m.id}", use_container_width=True,
+            if st.button(f"📖 {m.nom[:25]}", key=f"side_noue_{m.id}", width='stretch',
                          type="primary" if st.session_state.matiere_id == m.id else "secondary"):
                 naviguer("matiere", m.id, m.nom)
         with col2:
@@ -745,7 +745,7 @@ with st.sidebar:
     if not matieres:
         st.caption("Aucune matière")
 
-    if st.button("\uff0b Nouveau (mati\u00e8re ou UE)", use_container_width=True):
+    if st.button("\uff0b Nouveau (mati\u00e8re ou UE)", width='stretch'):
         st.session_state.show_new_mat = True
 
     db.close()
@@ -756,16 +756,16 @@ with st.sidebar:
     col1, col2, col3 = st.columns(3)
     with col1:
         theme_icon = "\u2600\ufe0f" if st.session_state.theme == "dark" else "\U0001f319"
-        if st.button(f"{theme_icon} Th\u00e8me", use_container_width=True, help="Basculer dark/light"):
+        if st.button(f"{theme_icon} Th\u00e8me", width='stretch', help="Basculer dark/light"):
             nouveau = "light" if st.session_state.theme == "dark" else "dark"
             st.session_state.theme = nouveau
             _set_theme(nouveau)
             st.rerun()
     with col2:
-        if st.button("\u2699\ufe0f Param\u00e8tres", use_container_width=True):
+        if st.button("\u2699\ufe0f Param\u00e8tres", width='stretch'):
             st.session_state.show_settings = True
     with col3:
-        if st.button("\u21a9\ufe0f Undo", use_container_width=True):
+        if st.button("\u21a9\ufe0f Undo", width='stretch'):
             try:
                 db2 = get_db()
                 db2.close()
@@ -802,7 +802,7 @@ if st.session_state.get("show_settings"):
                                     placeholder="sk-...", key="settings_api_key",
                                     label_visibility="collapsed")
         with col_b:
-            if st.button("\U0001f4be Sauvegarder", use_container_width=True):
+            if st.button("\U0001f4be Sauvegarder", width='stretch'):
                 db = get_db()
                 p = db.query(models.Parametre).filter(models.Parametre.cle == "deepseek_api_key").first()
                 if not p:
@@ -818,7 +818,7 @@ if st.session_state.get("show_settings"):
                 st.success("Cl\u00e9 API sauvegard\u00e9e !")
                 st.rerun()
 
-        if st.button("Fermer", use_container_width=True):
+        if st.button("Fermer", width='stretch'):
             st.session_state.show_settings = False
             st.rerun()
 
@@ -837,7 +837,7 @@ if st.session_state.get("show_new_mat"):
                 nom_mat = st.text_input("Nom de la matière", key="new_mat_name")
             with col2:
                 ue_mat = st.text_input("UE (optionnel)", key="new_mat_ue")
-            if st.button("Créer la matière", use_container_width=True) and nom_mat.strip():
+            if st.button("Créer la matière", width='stretch') and nom_mat.strip():
                 db = get_db()
                 try:
                     crud_service.creer_matiere(db, nom_mat.strip(), ue_mat.strip() if ue_mat.strip() else None)
@@ -851,7 +851,7 @@ if st.session_state.get("show_new_mat"):
 
         else:
             nom_ue = st.text_input("Nom de l'UE", placeholder="ex: UE 2 - Mathématiques", key="new_ue_name")
-            if st.button("Créer l'UE", use_container_width=True) and nom_ue.strip():
+            if st.button("Créer l'UE", width='stretch') and nom_ue.strip():
                 db = get_db()
                 try:
                     crud_service.creer_ue(db, nom_ue.strip())
@@ -862,7 +862,7 @@ if st.session_state.get("show_new_mat"):
                     st.error(str(e))
                 finally:
                     db.close()
-        if st.button("Annuler", use_container_width=True):
+        if st.button("Annuler", width='stretch'):
             st.session_state.show_new_mat = False
             rafraichir()
 
@@ -948,13 +948,13 @@ if st.session_state.page == "dashboard":
     if urgent > 0:
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button(f"📖 Lancer la session d'étude ({urgent})", use_container_width=True):
+            if st.button(f"📖 Lancer la session d'étude ({urgent})", width='stretch'):
                 st.session_state.page = "matiere"
                 st.session_state.matiere_id = None
                 st.session_state.show_session = True
                 st.rerun()
         with col2:
-            if st.button(f"⚡ Tout valider ({urgent})", use_container_width=True):
+            if st.button(f"⚡ Tout valider ({urgent})", width='stretch'):
                 db = get_db()
                 revision_service.valider_chapitres_urgents(db)
                 db.close()
@@ -970,12 +970,12 @@ if st.session_state.page == "dashboard":
             st.session_state.pomodoro_mode = "work"
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            if st.button("\u25b6\ufe0f D\u00e9marrer 25 min", use_container_width=True):
+            if st.button("\u25b6\ufe0f D\u00e9marrer 25 min", width='stretch'):
                 st.session_state.pomodoro_start = datetime.now()
                 st.session_state.pomodoro_mode = "work"
                 st.rerun()
         with col_p2:
-            if st.button("\u23f8\ufe0f Arr\u00eater", use_container_width=True):
+            if st.button("\u23f8\ufe0f Arr\u00eater", width='stretch'):
                 st.session_state.pomodoro_start = None
                 st.rerun()
         if st.session_state.pomodoro_start:
@@ -1081,18 +1081,18 @@ if st.session_state.page == "dashboard":
 
                     col1, col2 = st.columns([1, 1])
                     with col1:
-                        if st.button(f"✅ Valider — je connais", key=f"session_ok_{chap.uid}", use_container_width=True):
+                        if st.button(f"✅ Valider — je connais", key=f"session_ok_{chap.uid}", width='stretch'):
                             db = get_db()
                             c = crud_service.obtenir_chapitre(db, matiere.id, chap.uid)
                             if c: revision_service.valider_chapitre(db, c)
                             db.close()
                             st.rerun()
                     with col2:
-                        if st.button(f"📚 Pas encore — je repasse", key=f"session_ko_{chap.uid}", use_container_width=True):
+                        if st.button(f"📚 Pas encore — je repasse", key=f"session_ko_{chap.uid}", width='stretch'):
                             pass  # skip, reste dans la liste
 
             progress.empty()
-            if st.button("Terminer la session", use_container_width=True):
+            if st.button("Terminer la session", width='stretch'):
                 st.session_state.show_session = False
                 st.rerun()
 
@@ -1167,16 +1167,16 @@ elif st.session_state.page == "matiere" and st.session_state.matiere_id:
         # Actions matière
         col_a, col_b, col_c, col_d = st.columns(4)
         with col_a:
-            if st.button("✏️ Renommer", use_container_width=True):
+            if st.button("✏️ Renommer", width='stretch'):
                 st.session_state.show_rename_mat = True
         with col_b:
-            if st.button("🗑️ Supprimer", use_container_width=True):
+            if st.button("🗑️ Supprimer", width='stretch'):
                 st.session_state.show_delete_mat = True
         with col_c:
-            if st.button("📁 Assigner UE", use_container_width=True):
+            if st.button("📁 Assigner UE", width='stretch'):
                 st.session_state.show_assign_ue = True
         with col_d:
-            if st.button("＋ Ajouter", use_container_width=True, type="primary"):
+            if st.button("＋ Ajouter", width='stretch', type="primary"):
                 st.session_state.show_add_chap = True
 
     # Rename matiere
@@ -1374,7 +1374,7 @@ elif st.session_state.page == "stats":
         "Niveau": [f"J+{cfg.INTERVALLES_J[i] if i < 14 else '∞'}" for i in range(14)],
         "Chapitres": [compteurs.get(i, 0) for i in range(14)],
     })
-    st.bar_chart(df_dist.set_index("Niveau"), use_container_width=True)
+    st.bar_chart(df_dist.set_index("Niveau"), width='stretch')
 
     # Heatmap d'activité (90 jours) — simplifiée
     st.markdown("---")
@@ -1388,7 +1388,7 @@ elif st.session_state.page == "stats":
         heat_data.append({"date": d.strftime("%d/%m"), "révisions": rev})
 
     df_heat = pd.DataFrame(heat_data)
-    st.bar_chart(df_heat.set_index("date"), use_container_width=True)
+    st.bar_chart(df_heat.set_index("date"), width='stretch')
 
     # Graphique de progression (niveau moyen sur 30 jours)
     st.markdown("---")
@@ -1405,7 +1405,7 @@ elif st.session_state.page == "stats":
             count_cumul += 1
         progression_data.append({"date": d.strftime("%d/%m"), "niveau_moyen_cumul": niv_cumul / max(count_cumul, 1)})
     df_prog = pd.DataFrame(progression_data)
-    st.line_chart(df_prog.set_index("date"), use_container_width=True)
+    st.line_chart(df_prog.set_index("date"), width='stretch')
 
     # Pr\u00e9diction de note IA
     st.markdown("---")
@@ -1437,7 +1437,7 @@ elif st.session_state.page == "stats":
         anki_data.append({"Front": c.nom, "Back": f"Niveau {c.niveau_actuel}/{len(cfg.INTERVALLES_J)-1} - Prochaine r\u00e9vision : {c.date_prochaine}"})
     df_anki = pd.DataFrame(anki_data)
     csv_anki = df_anki.to_csv(index=False)
-    st.download_button("\U0001f4e5 T\u00e9l\u00e9charger pour Anki", csv_anki, "studytracker_anki.csv", "text/csv", use_container_width=True)
+    st.download_button("\U0001f4e5 T\u00e9l\u00e9charger pour Anki", csv_anki, "studytracker_anki.csv", "text/csv", width='stretch')
     st.caption("Importe ce CSV dans Anki : Fichier > Importer > Format CSV")
 
 
@@ -1530,7 +1530,7 @@ elif st.session_state.page == "examen":
             with col1:
                 nb_questions = st.slider("Nombre de questions", 3, 15, 8)
             with col2:
-                if st.button("\U0001f52c G\u00e9n\u00e9rer l'examen", use_container_width=True, type="primary"):
+                if st.button("\U0001f52c G\u00e9n\u00e9rer l'examen", width='stretch', type="primary"):
                     st.session_state.exam_generated = False
                     with st.spinner(f"\U0001f9e0 DeepSeek cr\u00e9e un examen de {nb_questions} questions..."):
                         import random
@@ -1569,7 +1569,7 @@ elif st.session_state.page == "examen":
                                        placeholder="Ta r\u00e9ponse...")
                     reponses.append(rep)
 
-                if st.button("\U0001f4ca Corriger l'examen", use_container_width=True, type="primary"):
+                if st.button("\U0001f4ca Corriger l'examen", width='stretch', type="primary"):
                     with st.spinner("\U0001f9e0 DeepSeek \u00e9value tes r\u00e9ponses..."):
                         try:
                             eval_result = ia.evaluer_reponses(
